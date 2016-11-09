@@ -24,6 +24,8 @@ typedef struct {
     // the namespace tree.
     ACPI_HANDLE ns_node;
     bool root_node;
+    mx_handle_t notify;    // event port
+    uint32_t event_mask;
 } acpi_handle_ctx_t;
 
 // Command functions.  These should return an error only if the connection
@@ -35,6 +37,8 @@ static mx_status_t cmd_s_state_transition(mx_handle_t h, acpi_handle_ctx_t* ctx,
 static mx_status_t cmd_ps0(mx_handle_t h, acpi_handle_ctx_t* ctx, void* cmd);
 static mx_status_t cmd_bst(mx_handle_t h, acpi_handle_ctx_t* ctx, void* cmd);
 static mx_status_t cmd_bif(mx_handle_t h, acpi_handle_ctx_t* ctx, void* cmd);
+static mx_status_t cmd_get_event_handle(mx_handle_t h, acpi_handle_ctx_t* ctx, void* cmd);
+static mx_status_t cmd_enable_event(mx_handle_t h, acpi_handle_ctx_t* ctx, void* cmd);
 static mx_status_t cmd_new_connection(mx_handle_t h, acpi_handle_ctx_t* ctx, void* cmd);
 
 typedef mx_status_t (*cmd_handler_t)(mx_handle_t, acpi_handle_ctx_t*, void*);
@@ -46,6 +50,8 @@ static const cmd_handler_t cmd_table[] = {
         [ACPI_CMD_PS0] = cmd_ps0,
         [ACPI_CMD_BST] = cmd_bst,
         [ACPI_CMD_BIF] = cmd_bif,
+        [ACPI_CMD_GET_EVENT_HANDLE] = cmd_get_event_handle,
+        [ACPI_CMD_ENABLE_EVENT] = cmd_enable_event,
         [ACPI_CMD_NEW_CONNECTION] = cmd_new_connection,
 };
 
@@ -600,6 +606,86 @@ static mx_status_t cmd_bif(mx_handle_t h, acpi_handle_ctx_t* ctx, void* _cmd) {
     rsp.oem[sizeof(rsp.oem)-1] = '\0';
     ACPI_FREE(obj);
 
+    return mx_channel_write(h, 0, &rsp, sizeof(rsp), NULL, 0);
+}
+
+static mx_status_t cmd_get_event_handle(mx_handle_t h, acpi_handle_ctx_t* ctx, void* cmd) {
+    acpi_cmd_hdr_t* hdr = (acpi_cmd_hdr_t*)cmd;
+    mx_status_t status;
+    mx_handle_t p;
+    // create a port to notify on
+    if (ctx->notify == MX_HANDLE_INVALID) {
+        if ((status = mx_port_create(0u, &ctx->notify)) < 0) {
+            return send_error(h, hdr->request_id, ERR_INTERNAL);
+        }
+    }
+    // duplicate the notify port for the requester
+    if ((status = mx_handle_duplicate(ctx->notify, MX_RIGHT_TRANSFER | MX_RIGHT_READ | MX_RIGHT_DUPLICATE, &p)) < 0) {
+        return send_error(h, hdr->request_id, ERR_INTERNAL);
+    }
+    acpi_rsp_hdr_t rsp;
+    rsp.status = NO_ERROR;
+    rsp.len = sizeof(rsp);
+    rsp.request_id = hdr->request_id;
+    return mx_channel_write(h, 0, &rsp, sizeof(rsp), &p, 1);
+}
+
+static void notify_handler(ACPI_HANDLE node, uint32_t value, void* _ctx) {
+    acpi_handle_ctx_t* ctx = _ctx;
+    if (ctx->ns_node != node) {
+        return;
+    }
+    uint16_t type;
+    if (value <= 0x7f) {
+        type = ACPI_EVENT_SYSTEM_NOTIFY;
+    } else if (value <= 0xff) {
+        type = ACPI_EVENT_DEVICE_NOTIFY;
+    } else {
+        return;
+    }
+    acpi_event_packet_t pkt = {
+        .hdr = {},
+        .version = 0,
+        .type = type,
+        .arg = value,
+    };
+    mx_port_queue(ctx->notify, &pkt, sizeof(pkt));
+}
+
+static mx_status_t cmd_enable_event(mx_handle_t h, acpi_handle_ctx_t* ctx, void* _cmd) {
+    acpi_cmd_enable_event_t* cmd = _cmd;
+    if (cmd->hdr.len != sizeof(*cmd)) {
+        return send_error(h, cmd->hdr.request_id, ERR_INVALID_ARGS);
+    }
+
+    if (ctx->notify == MX_HANDLE_INVALID) {
+        return send_error(h, cmd->hdr.request_id, ERR_BAD_STATE);
+    }
+    ctx->event_mask = cmd->type;
+
+    uint32_t type;
+    if ((cmd->type & ACPI_EVENT_SYSTEM_NOTIFY) && (cmd->type & ACPI_EVENT_DEVICE_NOTIFY)) {
+        type = ACPI_ALL_NOTIFY;
+    } else if (cmd->type & ACPI_EVENT_SYSTEM_NOTIFY) {
+        type = ACPI_SYSTEM_NOTIFY;
+    } else if (cmd->type & ACPI_EVENT_DEVICE_NOTIFY) {
+        type = ACPI_DEVICE_NOTIFY;
+    } else {
+        // FIXME(yky): other ACPI event types
+        return send_error(h, cmd->hdr.request_id, ERR_NOT_SUPPORTED);
+    }
+    ACPI_STATUS acpi_status = AcpiInstallNotifyHandler(ctx->ns_node, type, notify_handler, ctx);
+    if (acpi_status != AE_OK) {
+        return send_error(h, cmd->hdr.request_id, ERR_BAD_STATE);
+    }
+
+    acpi_rsp_enable_event_t rsp = {
+        .hdr = {
+            .status = NO_ERROR,
+            .len = sizeof(rsp),
+            .request_id = cmd->hdr.request_id,
+        },
+    };
     return mx_channel_write(h, 0, &rsp, sizeof(rsp), NULL, 0);
 }
 
