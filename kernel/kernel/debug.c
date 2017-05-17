@@ -90,6 +90,13 @@ static int cmd_threadstats(int argc, const cmd_args *argv, uint32_t flags)
         printf("\ttimer interrupts: %lu\n", thread_stats[i].timer_ints);
         printf("\ttimers: %lu\n", thread_stats[i].timers);
     }
+    THREAD_LOCK(state);
+    unsigned long acqs = thread_lock.acqs;
+    unsigned long contended_acqs = thread_lock.contended_acqs;
+    THREAD_UNLOCK(state);
+    printf("thread_lock acqs: %lu\n", acqs);
+    printf("thread_lock contended:   %lu\n", contended_acqs);
+    printf("thread_lock uncontended: %lu\n", acqs - contended_acqs);
 
     return 0;
 }

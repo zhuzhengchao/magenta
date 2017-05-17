@@ -13,9 +13,13 @@
 
 __BEGIN_CDECLS
 
-#define SPIN_LOCK_INITIAL_VALUE (0)
+#define SPIN_LOCK_INITIAL_VALUE (spin_lock_t){ 0, 0, 0 }
 
-typedef unsigned long spin_lock_t;
+typedef struct {
+    unsigned long lock;
+    unsigned long acqs;
+    unsigned long contended_acqs;
+} spin_lock_t;
 
 typedef x86_flags_t spin_lock_saved_state_t;
 typedef uint spin_lock_save_flags_t;
@@ -28,7 +32,7 @@ static inline void arch_spin_lock_init(spin_lock_t *lock)
 
 static inline bool arch_spin_lock_held(spin_lock_t *lock)
 {
-    return *lock != 0;
+    return lock->lock != 0;
 }
 
 void arch_spin_lock(spin_lock_t *lock);
@@ -43,26 +47,26 @@ static inline void arch_spin_lock_init(spin_lock_t *lock)
 
 static inline bool arch_spin_lock_held(spin_lock_t *lock)
 {
-    return *lock != 0;
+    return lock->lock != 0;
 }
 
 static inline void arch_spin_lock(spin_lock_t *lock)
 {
-    *lock = 1;
+    lock->lock = 1;
 }
 
 static inline int arch_spin_trylock(spin_lock_t *lock)
 {
-    if (*lock)
+    if (lock->lock)
         return 1;
 
-    *lock = 1;
+    lock->lock = 1;
     return 0;
 }
 
 static inline void arch_spin_unlock(spin_lock_t *lock)
 {
-    *lock = 0;
+    lock->lock = 0;
 }
 #endif // WITH_SMP
 

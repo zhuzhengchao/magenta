@@ -38,7 +38,7 @@
 #endif
 
 
-static spin_lock_t dputc_spin_lock = 0;
+static spin_lock_t dputc_spin_lock = SPIN_LOCK_INITIAL_VALUE;
 
 void __kernel_serial_write(const char *str, size_t len) {
     spin_lock_saved_state_t state;
@@ -49,7 +49,7 @@ void __kernel_serial_write(const char *str, size_t len) {
 }
 
 
-static spin_lock_t print_spin_lock = 0;
+static spin_lock_t print_spin_lock = SPIN_LOCK_INITIAL_VALUE;
 static struct list_node print_callbacks = LIST_INITIAL_VALUE(print_callbacks);
 
 void __kernel_console_write(const char *str, size_t len)

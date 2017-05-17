@@ -35,16 +35,24 @@ FUNCTION(x86_64_context_switch)
 #if WITH_SMP
 /* void arch_spin_lock(unsigned long *lock) */
 FUNCTION(arch_spin_lock)
+    xor %esi, %esi
+    mov $1, %rcx
+
 .Lspin:
     cmpq $0, (%rdi)
     je .Ltake_lock
+    mov %rcx, %rsi
     pause
     jmp .Lspin
 .Ltake_lock:
     mov $1, %rax
     xchg %rax, (%rdi)
     cmp $0, %rax // make sure we actually got the lock
+    cmovne %rcx, %rsi
     jne .Lspin // if we lost the race, resume waiting
+
+    incq 8(%rdi)
+    add %rsi, 16(%rdi)
     ret
 
 /* int arch_spin_trylock(unsigned long *lock) */
