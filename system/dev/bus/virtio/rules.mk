@@ -10,10 +10,12 @@ MODULE_TYPE := driver
 
 MODULE_SRCS := \
     $(LOCAL_DIR)/block.cpp \
+    $(LOCAL_DIR)/console.cpp \
     $(LOCAL_DIR)/device.cpp \
     $(LOCAL_DIR)/gpu.cpp \
     $(LOCAL_DIR)/ring.cpp \
     $(LOCAL_DIR)/utils.cpp \
+    $(LOCAL_DIR)/transfer_buffer_list.cpp \
     $(LOCAL_DIR)/virtio_c.c \
     $(LOCAL_DIR)/virtio_driver.cpp \
 

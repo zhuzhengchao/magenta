@@ -145,8 +145,9 @@ mx_status_t Device::Bind(pci_protocol_t* pci,
                     case VIRTIO_PCI_CAP_NOTIFY_CFG: {
                         MapBar(cap->bar);
                         mmio_regs_.notify_base = (volatile uint16_t*)((uintptr_t)bar_[cap->bar].mmio_base + cap->offset);
-                        mmio_regs_.notify_mul = 0x1000;
-                        LTRACEF("notify_base %p\n", mmio_regs_.notify_base);
+                        uint32_t *multiplier = (uint32_t *)(cap + 1);
+                        mmio_regs_.notify_mul = *multiplier;
+                        LTRACEF("notify_base %p, multiplier %u\n", mmio_regs_.notify_base, mmio_regs_.notify_mul);
                         break;
                     }
                     case VIRTIO_PCI_CAP_ISR_CFG: {
@@ -229,6 +230,7 @@ void Device::IrqWorker() {
         auto status = mx_interrupt_wait(irq_handle_.get());
         if (status < 0) {
             printf("virtio: error %d waiting for interrupt\n", status);
+            assert(0);
             continue;
         }
 
