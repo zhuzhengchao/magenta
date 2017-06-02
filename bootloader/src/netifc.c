@@ -66,9 +66,11 @@ static int eth_buffers_avail = 0;
 void* eth_get_buffer(size_t sz) {
     eth_buffer* buf;
     if (sz > ETH_BUFFER_SIZE) {
+        printf("Internal error: eth buffer reqeust too large\n");
         return NULL;
     }
     if (eth_buffers == NULL) {
+        printf("Error: tx buffers full\n");
         return NULL;
     }
     buf = eth_buffers;
@@ -332,7 +334,7 @@ int netifc_active(void) {
     return (snp != 0);
 }
 
-void netifc_poll(void) {
+void netifc_poll(void *cookie) {
     uint8_t data[1514];
     efi_status r;
     size_t hsz, bsz;
@@ -343,6 +345,7 @@ void netifc_poll(void) {
         // Only check for completion if we have operations in progress.
         // Otherwise, the result of GetStatus is unreliable. See MG-759.
         if ((r = snp->GetStatus(snp, &irq, &txdone))) {
+            printf("snp->GetStatus() failure!\n");
             return;
         }
         if (txdone) {
@@ -353,9 +356,8 @@ void netifc_poll(void) {
     hsz = 0;
     bsz = sizeof(data);
     r = snp->Receive(snp, &hsz, &bsz, data, NULL, NULL, NULL);
-    if (r != EFI_SUCCESS) {
+    if (r != EFI_SUCCESS)
         return;
-    }
 
 #if DROP_PACKETS
     rxc++;

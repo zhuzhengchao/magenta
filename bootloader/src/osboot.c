@@ -36,6 +36,12 @@ nbfile* netboot_get_buffer(const char* name, size_t size) {
     // we know these are in a buffer large enough
     // that this is safe (todo: implement strcmp)
     if (!memcmp(name, "kernel.bin", 11)) {
+        if (size > KBUFSIZE) {
+            printf("Insufficient memory for kernel image\n");
+            while (1)
+                ;
+        }
+        nbkernel.size = size;
         return &nbkernel;
     }
     if (!memcmp(name, "ramdisk.bin", 12)) {
@@ -239,16 +245,16 @@ void do_netboot() {
     printf("\nNetBoot Server Started...\n\n");
     efi_tpl prev_tpl = gBS->RaiseTPL(TPL_NOTIFY);
     while (true) {
-        int n = netboot_poll();
-        if (n < 1) {
-            continue;
-        }
-        if (nbkernel.offset < 32768) {
+        netboot_poll();
+
+        if (nbkernel.size < 32768) {
             // too small to be a kernel
+            printf("Kernel image too small :(\n");
             continue;
         }
         uint8_t* x = nbkernel.data;
         if ((x[0] == 'M') && (x[1] == 'Z') && (x[0x80] == 'P') && (x[0x81] == 'E')) {
+            printf("Lookin' good!\n");
             size_t exitdatasize;
             efi_status r;
             efi_handle h;
@@ -263,7 +269,7 @@ void do_netboot() {
                     },
                     .MemoryType = EfiLoaderData,
                     .StartAddress = (efi_physical_addr)nbkernel.data,
-                    .EndAddress = (efi_physical_addr)(nbkernel.data + nbkernel.offset),
+                    .EndAddress = (efi_physical_addr)(nbkernel.data + nbkernel.size),
                 },
                 {
                     .Header = {
@@ -276,7 +282,7 @@ void do_netboot() {
             };
 
             printf("Attempting to run EFI binary...\n");
-            r = gBS->LoadImage(false, gImg, (efi_device_path_protocol*)mempath, (void*)nbkernel.data, nbkernel.offset, &h);
+            r = gBS->LoadImage(false, gImg, (efi_device_path_protocol*)mempath, (void*)nbkernel.data, nbkernel.size, &h);
             if (EFI_ERROR(r)) {
                 printf("LoadImage Failed (%s)\n", xefi_strerror(r));
                 continue;
@@ -296,7 +302,7 @@ void do_netboot() {
         // Restore the TPL before booting the kernel, or failing to netboot
         gBS->RestoreTPL(prev_tpl);
 
-        cmdline_append((void*) nbcmdline.data, nbcmdline.offset);
+        cmdline_append((void*) nbcmdline.data, nbcmdline.size);
         print_cmdline();
 
         const char* fbres = cmdline_get("bootloader.fbres", NULL);
@@ -304,9 +310,11 @@ void do_netboot() {
             set_gfx_mode_from_cmdline(fbres);
         }
 
+printf("Ready to boot\n");
         // maybe it's a kernel image?
-        boot_kernel(gImg, gSys, (void*) nbkernel.data, nbkernel.offset,
-                    (void*) nbramdisk.data, nbramdisk.offset);
+        boot_kernel(gImg, gSys, (void*) nbkernel.data, nbkernel.size,
+                    (void*) nbramdisk.data, nbramdisk.size);
+printf("Hmm, that's strange...\n");
         break;
     }
 }
@@ -321,6 +329,8 @@ EFIAPI efi_status efi_main(efi_handle img, efi_system_table* sys) {
         sprintf(tmp, "%#" PRIx64 , mmio);
         cmdline_set("xdc.mmio", tmp);
     }
+
+    gBS->SetWatchdogTimer(0, 0x10000, 0, NULL);
 
     // Load the cmdline
     size_t csz = 0;

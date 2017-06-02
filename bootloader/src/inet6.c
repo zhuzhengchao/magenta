@@ -8,18 +8,20 @@
 
 #include <inet6.h>
 
-#if 1
-#define BAD(n, ...)                 \
+// Enable at your own risk. Some of these packet errors can be fairly
+// common when the buffers start to overflow.
+#if 0
+#define BAD_PACKET(n, ...)          \
     do {                            \
         printf("error: ");          \
-        printf(n, ##__VA_ARGS__); \
+        printf(n, ##__VA_ARGS__);   \
         printf("\n");               \
         return;                     \
     } while (0)
 #else
-#define BAD(n)  \
-    do {        \
-        return; \
+#define BAD_PACKET(n, ...)   \
+    do {                     \
+        return;              \
     } while (0)
 #endif
 
@@ -208,12 +210,18 @@ int udp6_send(const void* data, size_t dlen, const ip6_addr* daddr, uint16_t dpo
     size_t length = dlen + UDP_HDR_LEN;
     udp_pkt* p = eth_get_buffer(ETH_MTU + 2);
 
-    if (p == 0)
+    if (p == NULL)
         return -1;
-    if (dlen > UDP6_MAX_PAYLOAD)
+
+    if (dlen > UDP6_MAX_PAYLOAD) {
+        printf("Internal error: UDP write request is too long\n");
         goto fail;
+    }
     if (ip6_setup((void*)p, daddr, length, HDR_UDP))
+    {
+        printf("Error: ip6_setup failed!\n");
         goto fail;
+    }
 
     // udp header
     p->udp.src_port = htons(sport);
@@ -239,10 +247,14 @@ static int icmp6_send(const void* data, size_t length, const ip6_addr* daddr) {
     p = eth_get_buffer(ETH_MTU + 2);
     if (p == 0)
         return -1;
-    if (length > ICMP6_MAX_PAYLOAD)
+    if (length > ICMP6_MAX_PAYLOAD) {
+        printf("Internal error: ICMP write request is too long\n");
         goto fail;
-    if (ip6_setup(p, daddr, length, HDR_ICMP6))
+    }
+    if (ip6_setup(p, daddr, length, HDR_ICMP6)) {
+        printf("Error: ip6_setup failed!\n");
         goto fail;
+    }
 
     icmp = (void*)p->data;
     memcpy(icmp, data, length);
@@ -254,27 +266,35 @@ fail:
     return -1;
 }
 
+#include <magenta/boot/netboot.h>
+
 void _udp6_recv(ip6_hdr* ip, void* _data, size_t len) {
     udp_hdr* udp = _data;
     uint16_t sum, n;
 
     if (len < UDP_HDR_LEN)
-        BAD("Bogus Header Len");
+        BAD_PACKET("Bogus Header Len");
+
     if (udp->checksum == 0)
-        BAD("Checksum Invalid");
+        BAD_PACKET("Missing checksum");
+
     if (udp->checksum == 0xFFFF)
         udp->checksum = 0;
 
     sum = checksum(&ip->length, 2, htons(HDR_UDP));
     sum = checksum(ip->src, 32 + len, sum);
+
     if (sum != 0xFFFF)
-        BAD("Checksum Incorrect");
+        BAD_PACKET("Checksum Incorrect");
 
     n = ntohs(udp->length);
+
     if (n < UDP_HDR_LEN)
-        BAD("Bogus Header Len");
+        BAD_PACKET("Bogus Header Len");
+
     if (n > len)
-        BAD("Packet Too Short");
+        BAD_PACKET("Packet Too Short");
+
     len = n - UDP_HDR_LEN;
 
     udp6_recv((uint8_t*)_data + UDP_HDR_LEN, len,
@@ -287,14 +307,15 @@ void icmp6_recv(ip6_hdr* ip, void* _data, size_t len) {
     uint16_t sum;
 
     if (icmp->checksum == 0)
-        BAD("Checksum Invalid");
+        BAD_PACKET("Checksum Invalid");
+
     if (icmp->checksum == 0xFFFF)
         icmp->checksum = 0;
 
     sum = checksum(&ip->length, 2, htons(HDR_ICMP6));
     sum = checksum(ip->src, 32 + len, sum);
     if (sum != 0xFFFF)
-        BAD("Checksum Incorrect");
+        BAD_PACKET("Checksum Incorrect");
 
     if (icmp->type == ICMP6_NDP_N_SOLICIT) {
         ndp_n_hdr* ndp = _data;
@@ -304,11 +325,13 @@ void icmp6_recv(ip6_hdr* ip, void* _data, size_t len) {
         } msg;
 
         if (len < sizeof(ndp_n_hdr))
-            BAD("Bogus NDP Message");
+            BAD_PACKET("Bogus NDP Message");
+
         if (ndp->code != 0)
-            BAD("Bogus NDP Code");
+            BAD_PACKET("Bogus NDP Code");
+
         if (memcmp(ndp->target, &ll_ip6_addr, IP6_ADDR_LEN))
-            BAD("NDP Not For Me");
+            BAD_PACKET("NDP Not For Me");
 
         msg.hdr.type = ICMP6_NDP_N_ADVERTISE;
         msg.hdr.code = 0;
@@ -330,7 +353,7 @@ void icmp6_recv(ip6_hdr* ip, void* _data, size_t len) {
         return;
     }
 
-    BAD("ICMP6 Unhandled %d", icmp->type);
+    BAD_PACKET("ICMP6 Unhandled %d", icmp->type);
 }
 
 void eth_recv(void* _data, size_t len) {
@@ -339,11 +362,10 @@ void eth_recv(void* _data, size_t len) {
     uint32_t n;
 
     if (len < (ETH_HDR_LEN + IP6_HDR_LEN))
-        BAD("Bogus Header Len");
-    if (data[12] != (ETH_IP6 >> 8))
-        return;
-    if (data[13] != (ETH_IP6 & 0xFF))
-        return;
+        BAD_PACKET("Bogus Header Len");
+
+    if (data[12] != (ETH_IP6 >> 8) || data[13] != (ETH_IP6 & 0xFF))
+        BAD_PACKET("Not IP6");
 
     ip = (void*)(data + ETH_HDR_LEN);
     data += (ETH_HDR_LEN + IP6_HDR_LEN);
@@ -351,12 +373,12 @@ void eth_recv(void* _data, size_t len) {
 
     // require v6
     if ((ip->ver_tc_flow & 0xF0) != 0x60)
-        BAD("Unknown IP6 Version");
+        BAD_PACKET("Unknown IP6 Version");
 
     // ensure length is sane
     n = ntohs(ip->length);
     if (n > len)
-        BAD("IP6 Length Mismatch %d %zu", n, len);
+        BAD_PACKET("IP6 Length Mismatch %d %zu", n, len);
 
     // ignore any trailing data in the ethernet frame
     len = n;
@@ -382,7 +404,7 @@ void eth_recv(void* _data, size_t len) {
         return;
     }
 
-    BAD("Unhandled IP6 %d", ip->next_header);
+    BAD_PACKET("Unhandled IP6 %d", ip->next_header);
 }
 
 char* ip6toa(char* _out, void* ip6addr) {

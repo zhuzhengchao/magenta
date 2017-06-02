@@ -8,7 +8,7 @@
 int netifc_open(void);
 
 // process inbound packet(s)
-void netifc_poll(void);
+void netifc_poll(void *cookie);
 
 // return nonzero if interface exists
 int netifc_active(void);

@@ -33,6 +33,8 @@
 
 #define NB_ACK                0 // arg=0 or -err, NB_READ: data=data
 #define NB_FILE_RECEIVED      0x70000001 // arg=size
+#define NB_RESEND             0x70000002 // arg = # of offsets, data = offsets
+#define NB_RESEND_DONE        0x70000003 // arg = # of NB_RESEND packets sent
 
 #define NB_ADVERTISE          0x77777777
 
@@ -62,8 +64,8 @@ typedef struct nbfile_t {
 
 int netboot_init(const char* nodename);
 const char* netboot_nodename(void);
-int netboot_poll(void);
 void netboot_close(void);
+void netboot_poll(void);
 
 // Ask for a buffer suitable to put the file /name/ in
 // Return NULL to indicate /name/ is not wanted.
