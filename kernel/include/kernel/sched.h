@@ -15,11 +15,13 @@
 void sched_init_early(void);
 
 void sched_block(void);
-void sched_unblock(thread_t *t);
-void sched_unblock_list(struct list_node *list);
 void sched_yield(void);
 void sched_preempt(void);
 void sched_reschedule(void);
+
+/* return true if the thread was placed on the current cpu's run queue */
+bool sched_unblock(thread_t *t) __WARN_UNUSED_RESULT;
+bool sched_unblock_list(struct list_node *list) __WARN_UNUSED_RESULT;
 
 /* the low level reschedule routine, called from the scheduler */
 void _thread_resched_internal(void);

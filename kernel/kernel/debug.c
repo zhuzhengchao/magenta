@@ -149,7 +149,8 @@ static enum handler_return threadload(struct timer *t, lk_time_t now, void *arg)
         last_idle_time[i] = idle_time;
     }
 
-    return INT_NO_RESCHEDULE;
+    /* reschedule here to make sure any active logging threads are fired off */
+    return INT_RESCHEDULE;
 }
 
 static int cmd_threadload(int argc, const cmd_args *argv, uint32_t flags)
