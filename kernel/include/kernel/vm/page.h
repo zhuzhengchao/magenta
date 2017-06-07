@@ -11,11 +11,8 @@
 #include <magenta/compiler.h>
 #include <stdint.h>
 
-#if __cplusplus
+// forward declare
 class VmObject;
-#endif
-
-__BEGIN_CDECLS
 
 // core per page structure
 typedef struct vm_page {
@@ -30,13 +27,11 @@ typedef struct vm_page {
             // in allocated/just freed state, use a linked list to hold the page in a queue
             struct list_node node;
         } free;
-#if __cplusplus
         struct {
             // attached to a vm object
             uint64_t offset;
             VmObject* obj;
         } object;
-#endif
 
         uint8_t pad[24]; // pad out to 32 bytes
     };
@@ -64,5 +59,3 @@ static inline bool page_is_free(const vm_page_t* page) {
 
 const char* page_state_to_string(unsigned int state);
 void dump_page(const vm_page_t* page);
-
-__END_CDECLS
