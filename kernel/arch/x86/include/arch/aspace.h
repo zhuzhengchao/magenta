@@ -7,11 +7,9 @@
 
 #pragma once
 
-#include <magenta/compiler.h>
 #include <arch/x86/mmu.h>
 #include <kernel/spinlock.h>
-
-__BEGIN_CDECLS
+#include <kernel/vm/arch_vm_aspace.h>
 
 #define ARCH_ASPACE_MAGIC 0x41524153 // ARAS
 
@@ -39,5 +37,28 @@ struct arch_aspace {
     spin_lock_t io_bitmap_lock;
 };
 
-__END_CDECLS
+class X86ArchVmAspace final : public ArchVmAspaceBase {
+public:
+    X86ArchVmAspace();
+    virtual ~X86ArchVmAspace();
 
+    DISALLOW_COPY_ASSIGN_AND_MOVE(X86ArchVmAspace);
+
+    virtual status_t Init(vaddr_t base, size_t size, uint mmu_flags);
+    virtual status_t Destroy();
+
+    // main methods
+    virtual status_t Map(vaddr_t vaddr, paddr_t paddr, size_t count, uint mmu_flags, size_t* mapped);
+    virtual status_t Unmap(vaddr_t vaddr, size_t count, size_t* unmapped);
+    virtual status_t Protect(vaddr_t vaddr, size_t count, uint mmu_flags);
+    virtual status_t Query(vaddr_t vaddr, paddr_t* paddr, uint* mmu_flags);
+
+    static void ContextSwitch(X86ArchVmAspace *from, X86ArchVmAspace *to);
+
+    arch_aspace& GetInnerAspace() { return aspace_; }
+
+private:
+    arch_aspace aspace_ = {};
+};
+
+using ArchVmAspace = X86ArchVmAspace;

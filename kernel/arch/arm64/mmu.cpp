@@ -889,3 +889,38 @@ void arch_zero_page(void* _ptr) {
         ptr += zva_size;
     } while (ptr != end_ptr);
 }
+
+
+ARM64ArchVmAspace::ARM64ArchVmAspace() { }
+
+ARM64ArchVmAspace::~ARM64ArchVmAspace() {
+    // TODO: check that we've destroyed the aspace
+}
+
+status_t ARM64ArchVmAspace::Init(vaddr_t base, size_t size, uint mmu_flags) {
+    return arch_internal::arch_mmu_init_aspace(&aspace_, base, size, mmu_flags);
+}
+
+status_t ARM64ArchVmAspace::Destroy() {
+    return arch_internal::arch_mmu_destroy_aspace(&aspace_);
+}
+
+status_t ARM64ArchVmAspace::Map(vaddr_t vaddr, paddr_t paddr, size_t count, uint mmu_flags, size_t* mapped) {
+    return arch_internal::arch_mmu_map(&aspace_, vaddr, paddr, count, mmu_flags, mapped);
+}
+
+status_t ARM64ArchVmAspace::Unmap(vaddr_t vaddr, size_t count, size_t* unmapped) {
+    return arch_internal::arch_mmu_unmap(&aspace_, vaddr, count, unmapped);
+}
+
+status_t ARM64ArchVmAspace::Protect(vaddr_t vaddr, size_t count, uint mmu_flags) {
+    return arch_internal::arch_mmu_protect(&aspace_, vaddr, count, mmu_flags);
+}
+
+status_t ARM64ArchVmAspace::Query(vaddr_t vaddr, paddr_t* paddr, uint* mmu_flags) {
+    return arch_internal::arch_mmu_query(&aspace_, vaddr, paddr, mmu_flags);
+}
+
+void ARM64ArchVmAspace::ContextSwitch(ARM64ArchVmAspace *from, ARM64ArchVmAspace *to) {
+    arch_internal::arch_mmu_context_switch(from ? &from->aspace_ : nullptr, to ? &to->aspace_ : nullptr);
+}
