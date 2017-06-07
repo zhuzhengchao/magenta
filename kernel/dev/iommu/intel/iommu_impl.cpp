@@ -86,6 +86,7 @@ bool IommuImpl::IsValidBusTxnId(uint64_t bus_txn_id) const {
 
 status_t IommuImpl::Map(uint64_t bus_txn_id, paddr_t paddr, size_t size, uint32_t perms,
                         dev_vaddr_t* vaddr) {
+    TRACEF("IOMMU %lx %lx\n", mmio_.base(), bus_txn_id);
     DEBUG_ASSERT(vaddr);
     if (!IS_PAGE_ALIGNED(paddr) || !IS_PAGE_ALIGNED(size)) {
         return ERR_INVALID_ARGS;
