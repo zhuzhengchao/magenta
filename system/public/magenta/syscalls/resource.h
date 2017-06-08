@@ -18,6 +18,7 @@ __BEGIN_CDECLS
 #define MX_RREC_IRQ      (3u)
 #define MX_RREC_MMIO     (4u)
 #define MX_RREC_IOPORT   (5u)
+#define MX_RREC_BTI      (6u)
 
 // actions
 #define MX_RACT_ENABLE   (1u)
@@ -89,6 +90,16 @@ typedef struct mx_rrec_data {
     };
 } mx_rrec_data_t;
 
+typedef struct mx_rrec_bti {
+    uint16_t type;            // MX_RREC_BTI
+    uint16_t subtype;
+    uint32_t options;
+
+    uint64_t iommu_id;
+    uint64_t bti_id;
+    uint32_t reserved[10];
+} mx_rrec_bti_t;
+
 typedef union mx_rrec {
     uint16_t type;
     mx_rrec_self_t self;
@@ -96,6 +107,7 @@ typedef union mx_rrec {
     mx_rrec_irq_t irq;
     mx_rrec_mmio_t mmio;
     mx_rrec_ioport_t ioport;
+    mx_rrec_bti_t bti;
     uint8_t raw[64];
 } mx_rrec_t;
 

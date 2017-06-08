@@ -6,12 +6,14 @@
 
 #include <magenta/resource_dispatcher.h>
 
+#include <dev/iommu.h>
 #include <kernel/auto_lock.h>
 #include <kernel/vm/vm_object.h>
 #include <kernel/vm/vm_object_physical.h>
+#include <magenta/bus_transaction_initiator_dispatcher.h>
+#include <magenta/channel_dispatcher.h>
 #include <magenta/handle.h>
 #include <magenta/handle_owner.h>
-#include <magenta/channel_dispatcher.h>
 #include <magenta/interrupt_event_dispatcher.h>
 #include <magenta/vm_object_dispatcher.h>
 #include <mxalloc/new.h>
@@ -234,6 +236,17 @@ static mx_status_t ioport_do_action(const mx_rrec_t* rec, uint32_t action,
 }
 #endif
 
+static mx_status_t bti_create_dispatcher(const mx_rrec_t* rec, uint32_t options,
+                                         mxtl::RefPtr<Dispatcher>* dispatcher,
+                                         mx_rights_t* rights) {
+    auto iommu = Iommu::Get(rec->bti.iommu_id);
+    if (unlikely(!iommu)) {
+        return ERR_BAD_STATE;
+    }
+    return BusTransactionInitiatorDispatcher::Create(mxtl::move(iommu), rec->bti.bti_id,
+                                                     dispatcher, rights);
+}
+
 static mx_status_t default_create_dispatcher(const mx_rrec_t*, uint32_t,
                                              mxtl::RefPtr<Dispatcher>*, mx_rights_t*) {
     return ERR_NOT_SUPPORTED;
@@ -271,6 +284,13 @@ mx_status_t ResourceDispatcher::AddRecordLocked(mxtl::unique_ptr<ResourceRecord>
 #endif
     case MX_RREC_DATA:
         rrec->create_dispatcher_ = default_create_dispatcher;
+        rrec->do_action_ = default_do_action;
+        break;
+    case MX_RREC_BTI:
+        if (Iommu::Get(rec->bti.iommu_id) == nullptr) {
+            return ERR_INVALID_ARGS;
+        }
+        rrec->create_dispatcher_ = bti_create_dispatcher;
         rrec->do_action_ = default_do_action;
         break;
     default:
