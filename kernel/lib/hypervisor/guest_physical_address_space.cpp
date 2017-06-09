@@ -25,7 +25,7 @@ status_t GuestPhysicalAddressSpace::Create(mxtl::RefPtr<VmObject> guest_phys_mem
     if (!ac.check())
         return ERR_NO_MEMORY;
 
-    status_t status = guest_mmu_init_paspace(&gpas->paspace_, kAddressSpaceSize);
+    status_t status = gpas->Init(kAddressSpaceSize);
     if (status != NO_ERROR)
         return status;
 
@@ -42,41 +42,44 @@ GuestPhysicalAddressSpace::GuestPhysicalAddressSpace(mxtl::RefPtr<VmObject> gues
     : guest_phys_mem_(guest_phys_mem) {}
 
 GuestPhysicalAddressSpace::~GuestPhysicalAddressSpace() {
-    __UNUSED status_t status = guest_mmu_destroy_paspace(&paspace_);
+    status_t status = aspace_.Destroy();
     DEBUG_ASSERT(status == NO_ERROR);
 }
 
-static status_t map_page(guest_paspace_t* paspace, vaddr_t guest_paddr, paddr_t host_paddr,
+status_t GuestPhysicalAddressSpace::Init(size_t size) {
+    return aspace_.Init(0, size, 0);
+}
+
+static status_t map_page(ArchVmGuestAspace *aspace, vaddr_t guest_paddr, paddr_t host_paddr,
                          uint mmu_flags) {
     size_t mapped;
-    status_t status = guest_mmu_map(paspace, guest_paddr, host_paddr, 1, mmu_flags, &mapped);
+    status_t status = aspace->Map(guest_paddr, host_paddr, 1, mmu_flags, &mapped);
     if (status != NO_ERROR)
         return status;
     return mapped != 1 ? ERR_NO_MEMORY : NO_ERROR;
 }
 
 status_t GuestPhysicalAddressSpace::MapApicPage(vaddr_t guest_paddr, paddr_t host_paddr) {
-    return map_page(&paspace_, guest_paddr, host_paddr, kApicMmuFlags);
+    return map_page(&aspace_, guest_paddr, host_paddr, kApicMmuFlags);
 }
 
 status_t GuestPhysicalAddressSpace::MapRange(vaddr_t guest_paddr, size_t size) {
     auto mmu_map = [](void* context, size_t offset, size_t index, paddr_t pa) -> status_t {
-        guest_paspace_t* paspace = static_cast<guest_paspace_t*>(context);
-        return map_page(paspace, offset, pa, kMmuFlags);
+        ArchVmGuestAspace* aspace = static_cast<ArchVmGuestAspace*>(context);
+        return map_page(aspace, offset, pa, kMmuFlags);
     };
-    return guest_phys_mem_->Lookup(guest_paddr, size, kPfFlags, mmu_map, &paspace_);
+    return guest_phys_mem_->Lookup(guest_paddr, size, kPfFlags, mmu_map, &aspace_);
 }
 
 status_t GuestPhysicalAddressSpace::UnmapRange(vaddr_t guest_paddr, size_t size) {
     size_t num_pages = size / PAGE_SIZE;
     size_t unmapped;
-    status_t status = guest_mmu_unmap(&paspace_, guest_paddr, num_pages, &unmapped);
+    status_t status = aspace_.Unmap(guest_paddr, num_pages, &unmapped);
     if (status != NO_ERROR)
         return status;
     return unmapped != num_pages ? ERR_BAD_STATE : NO_ERROR;
 }
 
 status_t GuestPhysicalAddressSpace::GetPage(vaddr_t guest_paddr, paddr_t* host_paddr) {
-    uint mmu_flags;
-    return guest_mmu_query(&paspace_, guest_paddr, host_paddr, &mmu_flags);
+    return aspace_.Query(guest_paddr, host_paddr, nullptr);
 }

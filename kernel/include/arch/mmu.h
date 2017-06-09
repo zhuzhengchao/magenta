@@ -14,6 +14,7 @@
 // forward declare the per-address space arch-specific context object
 typedef struct arch_aspace arch_aspace_t;
 
+#if 0
 // put all of these inside an internal namespace to discourage older code from calling directly
 namespace arch_internal {
 
@@ -37,4 +38,5 @@ vaddr_t arch_mmu_pick_spot(const arch_aspace_t* aspace,
 void arch_mmu_context_switch(arch_aspace_t* old_aspace, arch_aspace_t* aspace);
 
 } // namespace arch_internal
+#endif
 

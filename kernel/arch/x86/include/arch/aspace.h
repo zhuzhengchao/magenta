@@ -61,4 +61,27 @@ private:
     arch_aspace aspace_ = {};
 };
 
+class X86ArchVmGuestAspace final : public ArchVmAspaceBase {
+public:
+    X86ArchVmGuestAspace();
+    virtual ~X86ArchVmGuestAspace();
+
+    DISALLOW_COPY_ASSIGN_AND_MOVE(X86ArchVmGuestAspace);
+
+    virtual status_t Init(vaddr_t base, size_t size, uint mmu_flags);
+    virtual status_t Destroy();
+
+    // main methods
+    virtual status_t Map(vaddr_t vaddr, paddr_t paddr, size_t count, uint mmu_flags, size_t* mapped);
+    virtual status_t Unmap(vaddr_t vaddr, size_t count, size_t* unmapped);
+    virtual status_t Protect(vaddr_t vaddr, size_t count, uint mmu_flags);
+    virtual status_t Query(vaddr_t vaddr, paddr_t* paddr, uint* mmu_flags);
+
+    paddr_t Pml4Address() const { return aspace_.pt_phys; }
+
+private:
+    arch_aspace aspace_ = {};
+};
+
 using ArchVmAspace = X86ArchVmAspace;
+using ArchVmGuestAspace = X86ArchVmGuestAspace;

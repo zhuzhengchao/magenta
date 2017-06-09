@@ -11,6 +11,7 @@
 #define ARCH_MMU_FLAG_GUEST_PASPACE     (1u << 8) /* guest physical address space */
 
 /* initialize per address space */
+namespace dontuse {
 status_t guest_mmu_init_paspace(guest_paspace_t* paspace, size_t size) __NONNULL((1));
 status_t guest_mmu_destroy_paspace(guest_paspace_t* paspace) __NONNULL((1));
 
@@ -19,3 +20,4 @@ status_t guest_mmu_map(guest_paspace_t* paspace, vaddr_t vaddr, paddr_t paddr, s
 status_t guest_mmu_unmap(guest_paspace_t* paspace, vaddr_t vaddr, size_t count, size_t* unmapped) __NONNULL((1));
 status_t guest_mmu_protect(guest_paspace_t* paspace, vaddr_t vaddr, size_t count, uint mmu_flags) __NONNULL((1));
 status_t guest_mmu_query(guest_paspace_t* paspace, vaddr_t vaddr, paddr_t* paddr, uint* mmu_flags) __NONNULL((1));
+};

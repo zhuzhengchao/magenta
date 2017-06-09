@@ -1145,7 +1145,7 @@ static status_t mmu_unmap(arch_aspace_t* aspace, vaddr_t vaddr, const size_t cou
     return NO_ERROR;
 }
 
-status_t arch_internal::arch_mmu_unmap(arch_aspace_t* aspace, vaddr_t vaddr, const size_t count,
+static status_t arch_mmu_unmap(arch_aspace_t* aspace, vaddr_t vaddr, const size_t count,
                         size_t* unmapped) {
     return mmu_unmap<PageTable>(aspace, vaddr, count, unmapped);
 }
@@ -1196,7 +1196,7 @@ static status_t mmu_map(arch_aspace_t* aspace, vaddr_t vaddr, paddr_t paddr, con
     return NO_ERROR;
 }
 
-status_t arch_internal::arch_mmu_map(arch_aspace_t* aspace, vaddr_t vaddr, paddr_t paddr, const size_t count,
+static status_t arch_mmu_map(arch_aspace_t* aspace, vaddr_t vaddr, paddr_t paddr, const size_t count,
                       uint mmu_flags, size_t* mapped) {
     return mmu_map<PageTable>(aspace, vaddr, paddr, count, mmu_flags, mapped);
 }
@@ -1239,7 +1239,7 @@ static status_t mmu_protect(arch_aspace_t* aspace, vaddr_t vaddr, size_t count, 
     return NO_ERROR;
 }
 
-status_t arch_internal::arch_mmu_protect(arch_aspace_t* aspace, vaddr_t vaddr, size_t count, uint mmu_flags) {
+static status_t arch_mmu_protect(arch_aspace_t* aspace, vaddr_t vaddr, size_t count, uint mmu_flags) {
     return mmu_protect<PageTable>(aspace, vaddr, count, mmu_flags);
 }
 
@@ -1278,7 +1278,7 @@ void x86_mmu_init(void) {}
 /*
  * Fill in the high level x86 arch aspace structure and allocating a top level page table.
  */
-status_t arch_internal::arch_mmu_init_aspace(arch_aspace_t* aspace, vaddr_t base, size_t size, uint mmu_flags) {
+static status_t arch_mmu_init_aspace(arch_aspace_t* aspace, vaddr_t base, size_t size, uint mmu_flags) {
     DEBUG_ASSERT(aspace);
     DEBUG_ASSERT(aspace->magic != ARCH_ASPACE_MAGIC);
 
@@ -1385,7 +1385,7 @@ status_t mmu_destroy_aspace(arch_aspace_t* aspace) {
     return NO_ERROR;
 }
 
-status_t arch_internal::arch_mmu_destroy_aspace(arch_aspace_t* aspace) {
+static status_t arch_mmu_destroy_aspace(arch_aspace_t* aspace) {
     return mmu_destroy_aspace<PageTable>(aspace);
 }
 
@@ -1393,7 +1393,7 @@ status_t guest_mmu_destroy_paspace(guest_paspace_t* paspace) {
     return mmu_destroy_aspace<ExtendedPageTable>(paspace);
 }
 
-void arch_internal::arch_mmu_context_switch(arch_aspace_t* old_aspace, arch_aspace_t* aspace) {
+static void arch_mmu_context_switch(arch_aspace_t* old_aspace, arch_aspace_t* aspace) {
     mp_cpu_mask_t cpu_bit = 1U << arch_curr_cpu_num();
     if (aspace != nullptr) {
         DEBUG_ASSERT(aspace->magic == ARCH_ASPACE_MAGIC);
@@ -1482,7 +1482,7 @@ static status_t mmu_query(arch_aspace_t* aspace, vaddr_t vaddr, paddr_t* paddr, 
     return NO_ERROR;
 }
 
-status_t arch_internal::arch_mmu_query(arch_aspace_t* aspace, vaddr_t vaddr, paddr_t* paddr, uint* mmu_flags) {
+static status_t arch_mmu_query(arch_aspace_t* aspace, vaddr_t vaddr, paddr_t* paddr, uint* mmu_flags) {
     return mmu_query<PageTable>(aspace, vaddr, paddr, mmu_flags, x86_mmu_flags);
 }
 
@@ -1521,29 +1521,29 @@ X86ArchVmAspace::~X86ArchVmAspace() {
 }
 
 status_t X86ArchVmAspace::Init(vaddr_t base, size_t size, uint mmu_flags) {
-    return arch_internal::arch_mmu_init_aspace(&aspace_, base, size, mmu_flags);
+    return arch_mmu_init_aspace(&aspace_, base, size, mmu_flags);
 }
 
 status_t X86ArchVmAspace::Destroy() {
-    return arch_internal::arch_mmu_destroy_aspace(&aspace_);
+    return arch_mmu_destroy_aspace(&aspace_);
 }
 
 status_t X86ArchVmAspace::Map(vaddr_t vaddr, paddr_t paddr, size_t count, uint mmu_flags, size_t* mapped) {
-    return arch_internal::arch_mmu_map(&aspace_, vaddr, paddr, count, mmu_flags, mapped);
+    return arch_mmu_map(&aspace_, vaddr, paddr, count, mmu_flags, mapped);
 }
 
 status_t X86ArchVmAspace::Unmap(vaddr_t vaddr, size_t count, size_t* unmapped) {
-    return arch_internal::arch_mmu_unmap(&aspace_, vaddr, count, unmapped);
+    return arch_mmu_unmap(&aspace_, vaddr, count, unmapped);
 }
 
 status_t X86ArchVmAspace::Protect(vaddr_t vaddr, size_t count, uint mmu_flags) {
-    return arch_internal::arch_mmu_protect(&aspace_, vaddr, count, mmu_flags);
+    return arch_mmu_protect(&aspace_, vaddr, count, mmu_flags);
 }
 
 status_t X86ArchVmAspace::Query(vaddr_t vaddr, paddr_t* paddr, uint* mmu_flags) {
-    return arch_internal::arch_mmu_query(&aspace_, vaddr, paddr, mmu_flags);
+    return arch_mmu_query(&aspace_, vaddr, paddr, mmu_flags);
 }
 
 void X86ArchVmAspace::ContextSwitch(X86ArchVmAspace *from, X86ArchVmAspace *to) {
-    arch_internal::arch_mmu_context_switch(from ? &from->aspace_ : nullptr, to ? &to->aspace_ : nullptr);
+    arch_mmu_context_switch(from ? &from->aspace_ : nullptr, to ? &to->aspace_ : nullptr);
 }
