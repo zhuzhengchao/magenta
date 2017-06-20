@@ -3,7 +3,12 @@ include "system/public/magenta/mdi/magenta.mdi"
 cpu-map = {
     clusters = {
         {
-            cpu-count = 8
+            name = "a53"
+            cpu-count = 16
+        }
+        {
+            name = "a53"
+            cpu-count = 15
         }
     }
 }
@@ -19,7 +24,7 @@ kernel = {
         base-phys = 0x08000000
         gicd-offset = 0x00000
         gicr-offset = 0xa0000
-        gicr-stride = 0x10000
+        gicr-stride = 0x20000
         ipi-base = 13
     }
     arm-psci = {

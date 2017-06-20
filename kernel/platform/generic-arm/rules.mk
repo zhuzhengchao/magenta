@@ -20,6 +20,8 @@ LINKER_SCRIPT += \
 
 ARCH := arm64
 ARM_CPU := cortex-a53
+SMP_CPU_MAX_CLUSTER_CPUS := 16
+SMP_MAX_CPUS := 31
 
 MODULE_DEPS += \
 	kernel/lib/cbuf \
