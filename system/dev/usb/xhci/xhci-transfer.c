@@ -499,6 +499,11 @@ void xhci_handle_transfer_event(xhci_t* xhci, xhci_trb_t* trb) {
         }
     }
 
+    int ep_state = xhci_get_ep_state(ep);
+    if (ep_state != EP_STATE_RUNNING) {
+        printf("xhci_handle_transfer_event: ep state %d cc %d\n", ep_state, cc);
+    }
+
     mx_status_t result;
     switch (cc) {
         case TRB_CC_SUCCESS:
