@@ -51,10 +51,15 @@ typedef struct {
     uint8_t mac_addr[6];
     uint8_t status[INTR_REQ_SIZE];
     bool online;
+    uint8_t bulk_in_addr;
+    uint8_t bulk_out_addr;
 
     // interrupt in request
     iotxn_t* interrupt_req;
     completion_t completion;
+    bool got_interrupt;
+    bool bulk_in_stopped;
+    bool bulk_out_stopped;
 
     // pool of free USB bulk requests
     list_node_t free_read_reqs;
@@ -292,17 +297,26 @@ static mx_status_t ax88179_recv(ax88179_t* eth, iotxn_t* request) {
 static void ax88179_read_complete(iotxn_t* request, void* cookie) {
     ax88179_t* eth = (ax88179_t*)cookie;
 
+if (request->status != MX_OK) {
+    printf("ax88179_read_complete err %d\n", request->status);
+}
     if (request->status == MX_ERR_IO_NOT_PRESENT) {
         iotxn_release(request);
         return;
     }
-
+    
     mtx_lock(&eth->mutex);
+
+    if (request->status == MX_ERR_IO_REFUSED) {
+        eth->bulk_in_stopped = true;
+        completion_signal(&eth->completion);
+    }
+
     if ((request->status == MX_OK) && eth->ifc) {
         ax88179_recv(eth, request);
     }
 
-    if (eth->online) {
+    if (eth->online && request->status != MX_ERR_IO_REFUSED) {
         iotxn_queue(eth->usb_device, request);
     } else {
         list_add_head(&eth->free_read_reqs, &request->node);
@@ -314,26 +328,39 @@ static void ax88179_write_complete(iotxn_t* request, void* cookie) {
     xxprintf("ax88179: write complete\n");
     ax88179_t* eth = (ax88179_t*)cookie;
 
+if (request->status != MX_OK) {
+    printf("ax88179_write_complete err %d\n", request->status);
+}
+
     if (request->status == MX_ERR_IO_NOT_PRESENT) {
         iotxn_release(request);
         return;
-    }
+    }  
 
     mtx_lock(&eth->tx_lock);
+
+    if (request->status == MX_ERR_IO_REFUSED) {
+        eth->bulk_out_stopped = true;
+        completion_signal(&eth->completion);
+    }
+
     list_add_tail(&eth->free_write_reqs, &request->node);
-    iotxn_t* next = list_remove_head_type(&eth->pending_tx, iotxn_t, node);
-    if (next == NULL) {
-        eth->tx_in_flight = false;
-        xxprintf("ax88179: no txns in flight\n");
-    } else {
-        xxprintf("ax88179: queuing iotxn (%p) of length %lu\n", next, next->length);
-        iotxn_queue(eth->usb_device, next);
+    if (request->status != MX_ERR_IO_REFUSED) {
+        iotxn_t* next = list_remove_head_type(&eth->pending_tx, iotxn_t, node);
+        if (next == NULL) {
+            eth->tx_in_flight = false;
+            xxprintf("ax88179: no txns in flight\n");
+        } else {
+            xxprintf("ax88179: queuing iotxn (%p) of length %lu\n", next, next->length);
+            iotxn_queue(eth->usb_device, next);
+        }
     }
     mtx_unlock(&eth->tx_lock);
 }
 
 static void ax88179_interrupt_complete(iotxn_t* request, void* cookie) {
     ax88179_t* eth = (ax88179_t*)cookie;
+    eth->got_interrupt = true;
     completion_signal(&eth->completion);
 }
 
@@ -688,19 +715,41 @@ static int ax88179_thread(void* arg) {
     uint64_t count = 0;
     iotxn_t* txn = eth->interrupt_req;
     while (true) {
+        eth->got_interrupt = false;
+        eth->bulk_in_stopped = false;
+        eth->bulk_out_stopped = false;
+    
         completion_reset(&eth->completion);
         iotxn_queue(eth->usb_device, txn);
         completion_wait(&eth->completion, MX_TIME_INFINITE);
-        if (txn->status != MX_OK) {
-            break;
-        }
-        count++;
-        ax88179_handle_interrupt(eth, txn);
+        
+        if (eth->got_interrupt) {
+            if (txn->status != MX_OK) {
+                break;
+            }
+            count++;
+            ax88179_handle_interrupt(eth, txn);
 #if AX88179_DEBUG_VERBOSE
-        if (count % 32 == 0) {
-            ax88179_dump_regs(eth);
-        }
+            if (count % 32 == 0) {
+                ax88179_dump_regs(eth);
+            }
 #endif
+        }
+        if (eth->bulk_in_stopped) {
+            usb_reset_endpoint(eth->usb_device, eth->bulk_in_addr);
+            mtx_lock(&eth->mutex);
+            // requeue any requests that were parked due to error or halt condition
+            iotxn_t* req;
+            iotxn_t* prev;
+            list_for_every_entry_safe(&eth->free_read_reqs, req, prev, iotxn_t, node) {
+                list_delete(&req->node);
+                iotxn_queue(eth->usb_device, req);
+            }
+            mtx_unlock(&eth->mutex);
+        }
+        if (eth->bulk_out_stopped) {
+            usb_reset_endpoint(eth->usb_device, eth->bulk_out_addr);
+        }
     }
 
 fail:
@@ -760,6 +809,8 @@ static mx_status_t ax88179_bind(void* ctx, mx_device_t* device, void** cookie) {
     mtx_init(&eth->mutex, mtx_plain);
 
     eth->usb_device = device;
+    eth->bulk_in_addr = bulk_in_addr;
+    eth->bulk_out_addr = bulk_out_addr;
 
     mx_status_t status = MX_OK;
     for (int i = 0; i < READ_REQ_COUNT; i++) {
