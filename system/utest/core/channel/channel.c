@@ -844,6 +844,55 @@ static bool channel_nest(void) {
     END_TEST;
 }
 
+static mx_handle_t channel[2];
+static mx_handle_t stash[2];
+
+static int move_it(void* unused) {
+    ASSERT_EQ(mx_nanosleep(mx_deadline_after(1000 * 1000 * 1000)), MX_OK, "");
+    /* ASSERT_EQ(mx_channel_write(stash[0], 0, NULL, 0, &channel[0], 1), MX_OK, ""); */
+    /* ASSERT_EQ(mx_nanosleep(mx_deadline_after(1000 * 1000 * 1000)), MX_OK, ""); */
+    /* ASSERT_EQ(mx_channel_read(stash[1], 0, NULL, &channel[0], 0, 1, NULL, NULL), MX_OK, ""); */
+    mx_txid_t id = 0;
+    ASSERT_EQ(mx_channel_write(channel[1], 0, &id, 4, &channel[0], 1), MX_OK, "");
+
+    return 0;
+}
+
+#include <magenta/status.h>
+
+static bool channel_race(void) {
+    BEGIN_TEST;
+    ASSERT_EQ(mx_channel_create(0, &channel[0], &channel[1]), MX_OK, "");
+    ASSERT_EQ(mx_channel_create(0, &stash[0], &stash[1]), MX_OK, "");
+
+    thrd_t racer;
+    ASSERT_EQ(thrd_create(&racer, &move_it, NULL), thrd_success, "");
+
+    mx_txid_t id = 0;
+    mx_handle_t dummy;
+    mx_channel_call_args_t args = {
+        &id,
+        &dummy,
+        &id,
+        &dummy,
+        4,
+        0,
+        4,
+        1,
+    };
+    mx_status_t read_status;
+    uint32_t actual_bytes;
+    uint32_t actual_handles;
+    mx_status_t status = mx_channel_call(channel[0], 0, MX_TIME_INFINITE, &args, &actual_bytes, &actual_handles, &read_status);
+    printf("GGKK %s\n", mx_status_get_string(status));
+    printf("GGKK %s\n", mx_status_get_string(read_status));
+
+    int result;
+    ASSERT_EQ(thrd_join(racer, &result), thrd_success, "");
+
+    END_TEST;
+}
+
 BEGIN_TEST_CASE(channel_tests)
 RUN_TEST(channel_test)
 RUN_TEST(channel_read_error_test)
@@ -856,6 +905,7 @@ RUN_TEST(channel_call)
 RUN_TEST(channel_call2)
 RUN_TEST(bad_channel_call_finish)
 RUN_TEST(channel_nest)
+RUN_TEST(channel_race)
 END_TEST_CASE(channel_tests)
 
 #ifndef BUILD_COMBINED_TESTS
