@@ -49,7 +49,8 @@ static mx_status_t cpustats(mx_handle_t root_resource, mx_time_t delay) {
            " excep"
            " pagef"
            "  sysc"
-           " ints (hw  tmr tmr_cb)"
+           "  ints"
+           " tmr (ints    cb   set)"
            " ipi (rs  gen)\n");
     for (size_t i = 0; i < actual; i++) {
         mx_time_t idle_time = stats[i].idle_time;
@@ -64,7 +65,8 @@ static mx_status_t cpustats(mx_handle_t root_resource, mx_time_t delay) {
                " %6lu"
                " %5lu"
                " %5lu"
-               " %8lu %4lu %6lu"
+               " %5lu"
+               " %9lu %5lu %5lu"
                " %8lu %4lu"
                "\n",
                i,
@@ -79,6 +81,7 @@ static mx_status_t cpustats(mx_handle_t root_resource, mx_time_t delay) {
                stats[i].ints - old_stats[i].ints,
                stats[i].timer_ints - old_stats[i].timer_ints,
                stats[i].timers - old_stats[i].timers,
+               stats[i].hw_timer_sets - old_stats[i].hw_timer_sets,
                stats[i].reschedule_ipis - old_stats[i].reschedule_ipis,
                stats[i].generic_ipis - old_stats[i].generic_ipis);
 

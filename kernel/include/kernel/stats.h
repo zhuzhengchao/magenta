@@ -23,6 +23,7 @@ struct cpu_stats {
     ulong interrupts; /* hardware interrupts, minus timer interrupts or inter-processor interrupts */
     ulong timer_ints; /* timer interrupts */
     ulong timers; /* timer callbacks */
+    ulong hw_timer_sets; /* number of times the hardware timers are set or cleared */
     ulong page_faults; /* page faults */
     ulong exceptions; /* exceptions such as undefined opcode */
     ulong syscalls;
