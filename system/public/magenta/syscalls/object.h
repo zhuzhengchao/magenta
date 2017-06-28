@@ -112,6 +112,10 @@ typedef struct mx_info_thread {
 typedef struct mx_info_thread_stats {
     // Total accumulated running time of the thread.
     mx_time_t total_runtime;
+
+    // syscall statistics
+    uint64_t syscalls;
+    uint64_t syscall_timeouts;
 } mx_info_thread_stats_t;
 
 // Statistics about resources (e.g., memory) used by a task. Can be relatively

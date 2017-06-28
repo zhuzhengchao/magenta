@@ -871,6 +871,8 @@ void UserThread::GetStatsForUserspace(mx_info_thread_stats_t* info) {
     *info = {};
 
     info->total_runtime = runtime_ns();
+    info->syscalls = stats_.syscalls;
+    info->syscall_timeouts = stats_.syscall_timeouts;
 }
 
 status_t UserThread::GetExceptionReport(mx_exception_report_t* report) {

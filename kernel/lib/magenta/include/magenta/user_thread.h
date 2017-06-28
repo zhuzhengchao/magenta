@@ -243,6 +243,14 @@ private:
     // in order to suspend a thread.
     ChannelDispatcher::MessageWaiter channel_waiter_;
 
+public:
+    // magenta level pre thread statistics
+    struct Stats {
+        uint64_t syscalls;
+        uint64_t syscall_timeouts;
+    } stats_ = {};
+
+private:
     // LK thread structure
     // put last to ease debugging since this is a pretty large structure
     // TODO(dje): Revisit eventually: How large? And how frequently are members
