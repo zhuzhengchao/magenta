@@ -289,6 +289,7 @@ typedef struct mx_info_cpu_stats {
     uint64_t ints;          // hardware interrupts, minus timer interrupts or inter-processor interrupts
     uint64_t timer_ints;    // timer interrupts
     uint64_t timers;        // timer callbacks
+    uint64_t hw_timer_sets; // hardware timer sets or clears
     uint64_t page_faults;   // page faults
     uint64_t exceptions;    // exceptions such as undefined opcode
     uint64_t syscalls;

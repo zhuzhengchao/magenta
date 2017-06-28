@@ -413,6 +413,7 @@ mx_status_t sys_object_get_info(mx_handle_t handle, uint32_t topic,
                 stats.ints = cpu->stats.interrupts;
                 stats.timer_ints = cpu->stats.timer_ints;
                 stats.timers = cpu->stats.timers;
+                stats.hw_timer_sets = cpu->stats.hw_timer_sets;
                 stats.page_faults = cpu->stats.page_faults;
                 stats.exceptions = cpu->stats.exceptions;
                 stats.syscalls = cpu->stats.syscalls;

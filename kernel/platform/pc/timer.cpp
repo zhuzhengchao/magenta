@@ -21,6 +21,7 @@
 #include <lk/init.h>
 #include <kernel/cmdline.h>
 #include <kernel/spinlock.h>
+#include <kernel/stats.h>
 #include <kernel/thread.h>
 #include <platform.h>
 #include <pow2.h>
@@ -605,6 +606,8 @@ status_t platform_set_oneshot_timer(lk_time_t deadline)
 {
     DEBUG_ASSERT(arch_ints_disabled());
 
+    CPU_STATS_INC(hw_timer_sets);
+
     deadline = discrete_time_roundup(deadline);
 
     if (use_tsc_deadline) {
@@ -666,6 +669,8 @@ status_t platform_set_oneshot_timer(lk_time_t deadline)
 
 void platform_stop_timer(void)
 {
+    CPU_STATS_INC(hw_timer_sets);
+
     /* Enable interrupt mode that will stop the decreasing counter of the PIT */
     //outp(I8253_CONTROL_REG, 0x30);
     apic_timer_stop();

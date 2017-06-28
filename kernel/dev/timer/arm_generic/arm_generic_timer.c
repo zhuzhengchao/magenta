@@ -10,9 +10,10 @@
 #include <assert.h>
 #include <inttypes.h>
 #include <lk/init.h>
-#include <platform.h>
+#include <kernel/stats.h>
 #include <dev/interrupt.h>
 #include <dev/timer/arm_generic.h>
+#include <platform.h>
 #include <platform/timer.h>
 #include <trace.h>
 
@@ -216,6 +217,8 @@ status_t platform_set_oneshot_timer(lk_time_t deadline)
 {
     DEBUG_ASSERT(arch_ints_disabled());
 
+    CPU_STATS_INC(hw_timer_sets);
+
     // Add one to the deadline, since with very high probability the deadline
     // straddles a counter tick.
     const uint64_t cntpct_deadline = lk_time_to_cntpct(deadline) + 1;
@@ -230,6 +233,8 @@ status_t platform_set_oneshot_timer(lk_time_t deadline)
 
 void platform_stop_timer(void)
 {
+    CPU_STATS_INC(hw_timer_sets);
+
     write_ctl(0);
 }
 
