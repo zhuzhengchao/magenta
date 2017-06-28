@@ -35,6 +35,7 @@ typedef struct {
     mx_koid_t proc_koid;
     mx_koid_t koid;
     mx_info_thread_t info;
+    mx_info_thread_stats_t last_stats;
     mx_info_thread_stats_t stats;
     char name[MX_MAX_NAME_LEN];
     char proc_name[MX_MAX_NAME_LEN];
@@ -124,6 +125,7 @@ static mx_status_t thread_callback(void* unused_ctx, int depth,
             temp->delta_time =
                 e.stats.total_runtime - temp->stats.total_runtime;
             temp->info = e.info;
+            temp->last_stats = temp->stats;
             temp->stats = e.stats;
             return MX_OK;
         }
@@ -170,8 +172,8 @@ static void sort_threads(enum sort_order order) {
 
 static void print_threads(void) {
     thread_info_t* e;
-    printf("%8s %8s %10s %5s %s\n",
-           "PID", "TID", raw_time ? "TIME_NS" : "TIME%", "STATE", "NAME");
+    printf("%8s %8s %10s %5s %6s %6s %s\n",
+           "PID", "TID", raw_time ? "TIME_NS" : "TIME%", "STATE", "SYS", "SYST", "NAME");
 
     int i = 0;
     list_for_every_entry (&thread_list, e, thread_info_t, node) {
@@ -184,12 +186,16 @@ static void print_threads(void) {
             if (e->delta_time > 0)
                 percent = e->delta_time / (double)delay * 100;
 
-            printf("%8lu %8lu %10.2f %5s %s:%s\n",
+            printf("%8lu %8lu %10.2f %5s %6lu %6lu %s:%s\n",
                    e->proc_koid, e->koid, percent, state_string(&e->info),
+                   e->stats.syscalls - e->last_stats.syscalls,
+                   e->stats.syscall_timeouts - e->last_stats.syscall_timeouts,
                    e->proc_name, e->name);
         } else {
-            printf("%8lu %8lu %10lu %5s %s:%s\n",
+            printf("%8lu %8lu %10lu %5s %6lu %6lu %s:%s\n",
                    e->proc_koid, e->koid, e->delta_time, state_string(&e->info),
+                   e->stats.syscalls - e->last_stats.syscalls,
+                   e->stats.syscall_timeouts - e->last_stats.syscall_timeouts,
                    e->proc_name, e->name);
         }
 

@@ -11,6 +11,7 @@
 #include <lib/vdso.h>
 #include <magenta/mx-syscall-numbers.h>
 #include <magenta/process_dispatcher.h>
+#include <magenta/thread_dispatcher.h>
 #include <platform.h>
 #include <trace.h>
 
@@ -75,6 +76,9 @@ extern "C" void arm64_syscall(struct arm64_iframe_long* frame, bool is_64bit, ui
 
     LTRACEF_LEVEL(2, "num %" PRIu64 "\n", syscall_num);
 
+    // bump the syscall count
+    UserThread::GetCurrent()->stats_.syscalls++;
+
     /* call the routine */
     uint64_t ret = invoke_syscall(
         syscall_num, pc,
@@ -117,14 +121,22 @@ inline x86_64_syscall_result do_syscall(uint64_t syscall_num, uint64_t ip,
     LTRACEF_LEVEL(2, "t %p syscall num %" PRIu64 " ip %#" PRIx64 "\n",
                   get_current_thread(), syscall_num, ip);
 
+    // bump the syscall count
+    UserThread *curr_thread = UserThread::GetCurrent();
+    curr_thread->stats_.syscalls++;
+
     const uintptr_t vdso_code_address =
-        ProcessDispatcher::GetCurrent()->vdso_code_address();
+        curr_thread->process()->vdso_code_address();
 
     uint64_t ret;
     if (unlikely(!valid_pc(ip - vdso_code_address))) {
         ret = sys_invalid_syscall(syscall_num, ip, vdso_code_address);
     } else {
         ret = make_call();
+    }
+
+    if ((int64_t)ret == MX_ERR_TIMED_OUT) {
+        curr_thread->stats_.syscall_timeouts++;
     }
 
     LTRACEF_LEVEL(2, "t %p ret %#" PRIx64 "\n", get_current_thread(), ret);
