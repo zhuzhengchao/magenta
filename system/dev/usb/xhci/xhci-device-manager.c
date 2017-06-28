@@ -154,7 +154,7 @@ static mx_status_t xhci_address_device(xhci_t* xhci, uint32_t slot_id, uint32_t 
     mtx_unlock(&xhci->input_context_lock);
 
     if (status == MX_OK) {
-        ep->enabled = true;
+        ep->state = EP_STATE_RUNNING;
     }
     return status;
 }
@@ -303,20 +303,20 @@ disable_slot_exit:
 }
 
 // returns true if endpoint was enabled
-static bool xhci_stop_endpoint(xhci_t* xhci, uint32_t slot_id, int ep_index, mx_status_t status) {
+static mx_status_t xhci_stop_endpoint(xhci_t* xhci, uint32_t slot_id, int ep_index,
+                                      xhci_ep_state_t new_state) {
     xhci_slot_t* slot = &xhci->slots[slot_id];
     xhci_endpoint_t* ep =  &slot->eps[ep_index];
     xhci_transfer_ring_t* transfer_ring = &ep->transfer_ring;
 
     mtx_lock(&ep->lock);
 
-    if (!ep->enabled) {
+    if (ep->state != EP_STATE_RUNNING) {
         mtx_unlock(&ep->lock);
-        return false;
+        return MX_ERR_BAD_STATE;
     }
 
-    ep->enabled = false;
-    ep->stopped_reason = status;
+    ep->state = new_state;
 
     list_node_t queued_copy;
     list_initialize(&queued_copy);
@@ -336,13 +336,14 @@ static bool xhci_stop_endpoint(xhci_t* xhci, uint32_t slot_id, int ep_index, mx_
         // TRB_CC_CONTEXT_STATE_ERROR is normal here in the case of a disconnected device,
         // since by then the endpoint would already be in error state.
         printf("TRB_CMD_STOP_ENDPOINT failed cc: %d\n", cc);
-        return false;
+        return MX_ERR_INTERNAL;
     }
 
     // Stopping the endpoint should have completed all pending transactions
     // before TRB_CMD_STOP_ENDPOINT completes
     MX_DEBUG_ASSERT(list_is_empty(&ep->pending_txns) && ep->current_txn == NULL);
 
+    ep->state = EP_STATE_DISABLED;
     free(ep->transfer_state);
     ep->transfer_state = NULL;
     xhci_transfer_ring_free(transfer_ring);
@@ -353,7 +354,7 @@ static bool xhci_stop_endpoint(xhci_t* xhci, uint32_t slot_id, int ep_index, mx_
         iotxn_complete(txn, txn->status, txn->actual);
     }
 
-    return true;
+    return MX_OK;
 }
 
 static mx_status_t xhci_handle_disconnect_device(xhci_t* xhci, uint32_t hub_address, uint32_t port) {
@@ -383,7 +384,8 @@ static mx_status_t xhci_handle_disconnect_device(xhci_t* xhci, uint32_t hub_addr
 
     uint32_t drop_flags = 0;
     for (int i = 0; i < XHCI_NUM_EPS; i++) {
-        if (xhci_stop_endpoint(xhci, slot_id, i, MX_ERR_IO_NOT_PRESENT)) {
+        if (slot->eps[i].state != EP_STATE_DISABLED) {
+            xhci_stop_endpoint(xhci, slot_id, i, EP_STATE_CLOSING);
             drop_flags |= XHCI_ICC_EP_FLAG(i);
          }
     }
@@ -580,7 +582,7 @@ mx_status_t xhci_enable_endpoint(xhci_t* xhci, uint32_t slot_id, usb_endpoint_de
         XHCI_SET_BITS32(&sc->sc0, SLOT_CTX_CONTEXT_ENTRIES_START, SLOT_CTX_CONTEXT_ENTRIES_BITS,
                         index + 1);
     } else {
-        xhci_stop_endpoint(xhci, slot_id, index, MX_ERR_BAD_STATE);
+        xhci_stop_endpoint(xhci, slot_id, index, EP_STATE_DISABLING);
         XHCI_WRITE32(&icc->drop_context_flags, XHCI_ICC_EP_FLAG(index));
     }
 
@@ -594,7 +596,7 @@ mx_status_t xhci_enable_endpoint(xhci_t* xhci, uint32_t slot_id, usb_endpoint_de
         if (!ep->transfer_state) {
             return MX_ERR_NO_MEMORY;
         }
-        ep->enabled = true;
+        ep->state = EP_STATE_RUNNING;
     }
 
     return status;
