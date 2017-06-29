@@ -244,7 +244,7 @@ private:
     ChannelDispatcher::MessageWaiter channel_waiter_;
 
 public:
-    // magenta level pre thread statistics
+    // magenta level per thread statistics
     struct Stats {
         uint64_t syscalls;
         uint64_t syscall_timeouts;

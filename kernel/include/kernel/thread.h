@@ -103,6 +103,9 @@ typedef struct thread {
      * left the scheduler. */
     lk_time_t runtime_ns;
 
+    /* number of page faults */
+    uint64_t page_faults;
+
     /* if blocked, a pointer to the wait queue */
     struct wait_queue *blocking_wait_queue;
 
