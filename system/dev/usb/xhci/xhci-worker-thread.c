@@ -11,26 +11,39 @@
 #include <string.h>
 #include <threads.h>
 
-#include "xhci-device-manager.h"
 #include "xhci-root-hub.h"
 #include "xhci-util.h"
+#include "xhci-worker-thread.h"
 
 //#define TRACE 1
 #include "xhci-debug.h"
 
-// list of devices pending result of enable slot command
-// list is kept on xhci_t.command_queue
-typedef struct {
+typedef struct xhci_worker_thread {
+    xhci_t* xhci;
+    list_node_t node;
+    thrd_t thread;
+    completion_t completion;
+
+    // command information
     enum {
         ENUMERATE_DEVICE,
         DISCONNECT_DEVICE,
         START_ROOT_HUBS,
+        QUIT,
     } command;
-    list_node_t node;
+
     uint32_t hub_address;
     uint32_t port;
     usb_speed_t speed;
-} xhci_device_command_t;
+    
+    // DMA memory
+    uint8_t* input_context;
+    mx_paddr_t input_context_phys;
+    mx_handle_t input_context_handle;
+    mx_vaddr_t input_context_virt;
+} xhci_worker_thread_t;
+
+static void xhci_return_worker_thread(xhci_worker_thread_t* wt);
 
 static uint32_t xhci_get_route_string(xhci_t* xhci, uint32_t hub_address, uint32_t port) {
     if (hub_address == 0) {
@@ -51,12 +64,17 @@ static uint32_t xhci_get_route_string(xhci_t* xhci, uint32_t hub_address, uint32
     return route;
 }
 
-static mx_status_t xhci_address_device(xhci_t* xhci, uint32_t slot_id, uint32_t hub_address,
-                                       uint32_t port, usb_speed_t speed) {
-    xprintf("xhci_address_device slot_id: %d port: %d hub_address: %d speed: %d\n",
-            slot_id, port, hub_address, speed);
+static mx_status_t xhci_address_device(xhci_worker_thread_t* wt, uint32_t slot_id) {
+    xhci_t* xhci = wt->xhci;
 
-    int rh_index = xhci_get_root_hub_index(xhci, hub_address);
+    xprintf("xhci_address_device slot_id: %d port: %d hub_address: %d speed: %d\n",
+            slot_id, wt->port, wt->hub_address, wt->speed);
+
+    int rh_index = xhci_get_root_hub_index(xhci, wt->hub_address);
+    uint32_t hub_address = wt->hub_address;
+    uint32_t port = wt->port;
+    usb_speed_t speed = wt->speed;
+
     if (rh_index >= 0) {
         // For virtual root hub devices, real hub_address is 0
         hub_address = 0;
@@ -89,11 +107,10 @@ static mx_status_t xhci_address_device(xhci_t* xhci, uint32_t slot_id, uint32_t 
     }
     xhci_transfer_ring_t* transfer_ring = &ep->transfer_ring;
 
-    mtx_lock(&xhci->input_context_lock);
-    xhci_input_control_context_t* icc = (xhci_input_control_context_t*)xhci->input_context;
-    mx_paddr_t icc_phys = xhci->input_context_phys;
-    xhci_slot_context_t* sc = (xhci_slot_context_t*)&xhci->input_context[1 * xhci->context_size];
-    xhci_endpoint_context_t* ep0c = (xhci_endpoint_context_t*)&xhci->input_context[2 * xhci->context_size];
+    xhci_input_control_context_t* icc = (xhci_input_control_context_t*)wt->input_context;
+    mx_paddr_t icc_phys = wt->input_context_phys;
+    xhci_slot_context_t* sc = (xhci_slot_context_t*)&wt->input_context[1 * xhci->context_size];
+    xhci_endpoint_context_t* ep0c = (xhci_endpoint_context_t*)&wt->input_context[2 * xhci->context_size];
     memset((void*)icc, 0, xhci->context_size);
     memset((void*)sc, 0, xhci->context_size);
     memset((void*)ep0c, 0, xhci->context_size);
@@ -118,6 +135,7 @@ static mx_status_t xhci_address_device(xhci_t* xhci, uint32_t slot_id, uint32_t 
     uint32_t mtt = 0;
     uint32_t tt_hub_slot_id = 0;
     uint32_t tt_port_number = 0;
+
     if (hub_address != 0 && (speed == USB_SPEED_LOW || speed == USB_SPEED_FULL)) {
         xhci_slot_t* hub_slot = &xhci->slots[hub_address];
         if (hub_slot->speed == USB_SPEED_HIGH) {
@@ -151,7 +169,6 @@ static mx_status_t xhci_address_device(xhci_t* xhci, uint32_t slot_id, uint32_t 
             break;
         }
     }
-    mtx_unlock(&xhci->input_context_lock);
 
     if (status == MX_OK) {
         ep->state = EP_STATE_RUNNING;
@@ -211,9 +228,9 @@ static void xhci_disable_slot(xhci_t* xhci, uint32_t slot_id) {
     memset(slot, 0, sizeof(*slot));
 }
 
-static mx_status_t xhci_handle_enumerate_device(xhci_t* xhci, uint32_t hub_address, uint32_t port,
-                                                usb_speed_t speed) {
+static mx_status_t xhci_handle_enumerate_device(xhci_worker_thread_t* wt) {
     xprintf("xhci_handle_enumerate_device\n");
+    xhci_t* xhci = wt->xhci;
     mx_status_t result = MX_OK;
     uint32_t slot_id = 0;
 
@@ -230,7 +247,7 @@ static mx_status_t xhci_handle_enumerate_device(xhci_t* xhci, uint32_t hub_addre
     xhci_slot_t* slot = &xhci->slots[slot_id];
     memset(slot, 0, sizeof(*slot));
 
-    result = xhci_address_device(xhci, slot_id, hub_address, port, speed);
+    result = xhci_address_device(wt, slot_id);
     if (result != MX_OK) {
         goto disable_slot_exit;
     }
@@ -253,7 +270,7 @@ static mx_status_t xhci_handle_enumerate_device(xhci_t* xhci, uint32_t hub_addre
 
     int mps = device_descriptor.bMaxPacketSize0;
     // enforce correct max packet size for ep0
-    switch (speed) {
+    switch (wt->speed) {
         case USB_SPEED_LOW:
             mps = 8;
             break;
@@ -274,11 +291,10 @@ static mx_status_t xhci_handle_enumerate_device(xhci_t* xhci, uint32_t hub_addre
     }
 
     // update the max packet size in our device context
-    mtx_lock(&xhci->input_context_lock);
-    xhci_input_control_context_t* icc = (xhci_input_control_context_t*)xhci->input_context;
-    mx_paddr_t icc_phys = xhci->input_context_phys;
+    xhci_input_control_context_t* icc = (xhci_input_control_context_t*)wt->input_context;
+    mx_paddr_t icc_phys = wt->input_context_phys;
     xhci_endpoint_context_t* ep0c = (xhci_endpoint_context_t*)
-                                            &xhci->input_context[2 * xhci->context_size];
+                                            &wt->input_context[2 * xhci->context_size];
     memset((void*)icc, 0, xhci->context_size);
     memset((void*)ep0c, 0, xhci->context_size);
 
@@ -287,13 +303,12 @@ static mx_status_t xhci_handle_enumerate_device(xhci_t* xhci, uint32_t hub_addre
 
     result = xhci_send_command(xhci, TRB_CMD_EVAL_CONTEXT, icc_phys,
                                (slot_id << TRB_SLOT_ID_START));
-    mtx_unlock(&xhci->input_context_lock);
     if (result != MX_OK) {
         printf("TRB_CMD_EVAL_CONTEXT failed\n");
         goto disable_slot_exit;
     }
 
-    xhci_add_device(xhci, slot_id, hub_address, speed);
+    xhci_add_device(xhci, slot_id, wt->hub_address, wt->speed);
     return MX_OK;
 
 disable_slot_exit:
@@ -358,10 +373,13 @@ static mx_status_t xhci_stop_endpoint(xhci_t* xhci, uint32_t slot_id, int ep_ind
     return MX_OK;
 }
 
-static mx_status_t xhci_handle_disconnect_device(xhci_t* xhci, uint32_t hub_address, uint32_t port) {
+static mx_status_t xhci_handle_disconnect_device(xhci_worker_thread_t* wt) {
     xprintf("xhci_handle_disconnect_device\n");
+    xhci_t* xhci = wt->xhci;
     xhci_slot_t* slot = NULL;
     uint32_t slot_id;
+    uint32_t hub_address = wt->hub_address;
+    uint32_t port = wt->port;
 
     int rh_index = xhci_get_root_hub_index(xhci, hub_address);
     if (rh_index >= 0) {
@@ -393,15 +411,13 @@ static mx_status_t xhci_handle_disconnect_device(xhci_t* xhci, uint32_t hub_addr
 
     xhci_remove_device(xhci, slot_id);
 
-    mtx_lock(&xhci->input_context_lock);
-    xhci_input_control_context_t* icc = (xhci_input_control_context_t*)xhci->input_context;
-    mx_paddr_t icc_phys = xhci->input_context_phys;
+    xhci_input_control_context_t* icc = (xhci_input_control_context_t*)wt->input_context;
+    mx_paddr_t icc_phys = wt->input_context_phys;
     memset((void*)icc, 0, xhci->context_size);
     XHCI_WRITE32(&icc->drop_context_flags, drop_flags);
 
     mx_status_t status = xhci_send_command(xhci, TRB_CMD_CONFIGURE_EP, icc_phys,
                                            (slot_id << TRB_SLOT_ID_START));
-    mtx_unlock(&xhci->input_context_lock);
     if (status != MX_OK) {
         printf("TRB_CMD_CONFIGURE_EP failed\n");
     }
@@ -411,73 +427,121 @@ static mx_status_t xhci_handle_disconnect_device(xhci_t* xhci, uint32_t hub_addr
     return MX_OK;
 }
 
-static int xhci_device_thread(void* arg) {
-    xhci_t* xhci = (xhci_t*)arg;
+static int xhci_worker_thread(void* arg) {
+    xhci_worker_thread_t* wt = (xhci_worker_thread_t*)arg;
+    bool done = false;
 
-    while (1) {
-        xprintf("xhci_device_thread top of loop\n");
-        // wait for a device to enumerate
-        completion_wait(&xhci->command_queue_completion, MX_TIME_INFINITE);
+    while (!done) {
+        xprintf("xhci_worker_thread top of loop\n");
+        completion_wait(&wt->completion, MX_TIME_INFINITE);
+        completion_reset(&wt->completion);
 
-        mtx_lock(&xhci->command_queue_mutex);
-        list_node_t* node = list_remove_head(&xhci->command_queue);
-        xhci_device_command_t* command = (node ? containerof(node, xhci_device_command_t, node) : NULL);
-        if (list_is_empty(&xhci->command_queue)) {
-            completion_reset(&xhci->command_queue_completion);
-        }
-        mtx_unlock(&xhci->command_queue_mutex);
-
-        if (!command) {
-            printf("ERROR: command_queue_completion was signaled, but no command was found");
-            break;
-        }
-
-        switch (command->command) {
+        switch (wt->command) {
         case ENUMERATE_DEVICE:
-            xhci_handle_enumerate_device(xhci, command->hub_address, command->port, command->speed);
+            xhci_handle_enumerate_device(wt);
             break;
         case DISCONNECT_DEVICE:
-            xhci_handle_disconnect_device(xhci, command->hub_address, command->port);
+            xhci_handle_disconnect_device(wt);
             break;
         case START_ROOT_HUBS:
-            xhci_start_root_hubs(xhci);
+            xhci_start_root_hubs(wt->xhci);
+        case QUIT:
+            done = true;
+            break;
+        }
+
+        if (!done) {
+            xhci_return_worker_thread(wt);
         }
     }
 
     return 0;
 }
 
-void xhci_start_device_thread(xhci_t* xhci) {
-    thrd_create_with_name(&xhci->device_thread, xhci_device_thread, xhci, "xhci_device_thread");
+static void xhci_queue_command(xhci_worker_thread_t* wt, int command, uint32_t hub_address,
+                               uint32_t port, usb_speed_t speed) {
+    wt->command = command;
+    wt->hub_address = hub_address;
+    wt->port = port;
+    wt->speed = speed;
+
+    completion_signal(&wt->completion);
 }
 
-static mx_status_t xhci_queue_command(xhci_t* xhci, int command, uint32_t hub_address,
-                                      uint32_t port, usb_speed_t speed) {
-    xhci_device_command_t* device_command = calloc(1, sizeof(xhci_device_command_t));
-    if (!device_command) {
-        printf("out of memory\n");
-        return MX_ERR_NO_MEMORY;
-    }
-    device_command->command = command;
-    device_command->hub_address = hub_address;
-    device_command->port = port;
-    device_command->speed = speed;
+static mx_status_t xhci_worker_thread_init(xhci_t* xhci, xhci_worker_thread_t* wt) {
+    wt->xhci = xhci;
 
-    mtx_lock(&xhci->command_queue_mutex);
-    list_add_tail(&xhci->command_queue, &device_command->node);
-    completion_signal(&xhci->command_queue_completion);
-    mtx_unlock(&xhci->command_queue_mutex);
+    mx_status_t status = xhci_vmo_init(PAGE_SIZE, &wt->input_context_handle,
+                                       &wt->input_context_virt, false);
+    if (status != MX_OK) {
+        printf("xhci_worker_thread_init: xhci_vmo_init failed: %d\n", status);
+        return status;
+    }
+
+    wt->input_context = (uint8_t *)wt->input_context_virt;
+    status = mx_vmo_op_range(wt->input_context_handle, MX_VMO_OP_LOOKUP, 0, PAGE_SIZE,
+                             &wt->input_context_phys, sizeof(wt->input_context_phys));
+    if (status != MX_OK) {
+        printf("xhci_worker_thread_init: mx_vmo_op_range failed: %d\n", status);
+        xhci_vmo_release(wt->input_context_handle, wt->input_context_virt);
+        return status;
+    }
+
+    completion_reset(&wt->completion);
+    thrd_create_with_name(&wt->thread, xhci_worker_thread, wt, "xhci_worker_thread");
 
     return MX_OK;
 }
 
+static mx_status_t xhci_get_worker_thread(xhci_t* xhci, xhci_worker_thread_t** out_wt) {
+    xhci_worker_thread_t* wt;
+
+    mtx_lock(&xhci->worker_threads_lock);
+    wt = list_remove_head_type(&xhci->idle_worker_threads, xhci_worker_thread_t, node);
+    mtx_unlock(&xhci->worker_threads_lock);
+
+    if (!wt) {
+        wt = calloc(1, sizeof(xhci_worker_thread_t));
+        if (!wt) {
+            return MX_ERR_NO_MEMORY;
+        }
+        mx_status_t status = xhci_worker_thread_init(xhci, wt);
+        if (status != MX_OK) {
+            free(wt);
+            return status;
+        }
+    }
+
+    *out_wt = wt;
+    return MX_OK;
+}
+
+static void xhci_return_worker_thread(xhci_worker_thread_t* wt) {
+    xhci_t* xhci = wt->xhci;
+
+    // TODO - free worker threads if we have more than X number idle
+    mtx_lock(&xhci->worker_threads_lock);
+    list_add_head(&xhci->idle_worker_threads, &wt->node);
+    mtx_unlock(&xhci->worker_threads_lock);
+}
+
 mx_status_t xhci_enumerate_device(xhci_t* xhci, uint32_t hub_address, uint32_t port,
                                   usb_speed_t speed) {
-    return xhci_queue_command(xhci, ENUMERATE_DEVICE, hub_address, port, speed);
+    xhci_worker_thread_t* wt;
+
+    mx_status_t status = xhci_get_worker_thread(xhci, &wt);
+    if (status != MX_OK) {
+        return status;
+    }
+
+    xhci_queue_command(wt, ENUMERATE_DEVICE, hub_address, port, speed);
+    return MX_OK;
 }
 
 mx_status_t xhci_device_disconnected(xhci_t* xhci, uint32_t hub_address, uint32_t port) {
     xprintf("xhci_device_disconnected %d %d\n", hub_address, port);
+
+/* FIXME what to do here???
     mtx_lock(&xhci->command_queue_mutex);
     // check pending device list first
     xhci_device_command_t* command;
@@ -491,12 +555,28 @@ mx_status_t xhci_device_disconnected(xhci_t* xhci, uint32_t hub_address, uint32_
         }
     }
     mtx_unlock(&xhci->command_queue_mutex);
+*/
+    xhci_worker_thread_t* wt;
 
-    return xhci_queue_command(xhci, DISCONNECT_DEVICE, hub_address, port, USB_SPEED_UNDEFINED);
+    mx_status_t status = xhci_get_worker_thread(xhci, &wt);
+    if (status != MX_OK) {
+        return status;
+    }
+
+    xhci_queue_command(wt, DISCONNECT_DEVICE, hub_address, port, USB_SPEED_UNDEFINED);
+    return MX_OK;
 }
 
 mx_status_t xhci_queue_start_root_hubs(xhci_t* xhci) {
-    return xhci_queue_command(xhci, START_ROOT_HUBS, 0, 0, USB_SPEED_UNDEFINED);
+    xhci_worker_thread_t* wt;
+
+    mx_status_t status = xhci_get_worker_thread(xhci, &wt);
+    if (status != MX_OK) {
+        return status;
+    }
+
+    xhci_queue_command(wt, START_ROOT_HUBS, 0, 0, USB_SPEED_UNDEFINED);
+    return MX_OK;
 }
 
 mx_status_t xhci_enable_endpoint(xhci_t* xhci, uint32_t slot_id, usb_endpoint_descriptor_t* ep_desc,
@@ -515,10 +595,17 @@ mx_status_t xhci_enable_endpoint(xhci_t* xhci, uint32_t slot_id, usb_endpoint_de
         return MX_OK;
     }
 
-    mtx_lock(&xhci->input_context_lock);
-    xhci_input_control_context_t* icc = (xhci_input_control_context_t*)xhci->input_context;
-    mx_paddr_t icc_phys = xhci->input_context_phys;
-    xhci_slot_context_t* sc = (xhci_slot_context_t*)&xhci->input_context[1 * xhci->context_size];
+    // we perform this action synchronously
+    // we only use the worker thread for its DMA buffer
+    xhci_worker_thread_t* wt;
+    mx_status_t status = xhci_get_worker_thread(xhci, &wt);
+    if (status != MX_OK) {
+        return status;
+    }
+
+    xhci_input_control_context_t* icc = (xhci_input_control_context_t*)wt->input_context;
+    mx_paddr_t icc_phys = wt->input_context_phys;
+    xhci_slot_context_t* sc = (xhci_slot_context_t*)&wt->input_context[1 * xhci->context_size];
     memset((void*)icc, 0, xhci->context_size);
 
     if (enable) {
@@ -552,13 +639,12 @@ mx_status_t xhci_enable_endpoint(xhci_t* xhci, uint32_t slot_id, usb_endpoint_de
             max_esit_payload = max_packet_size * max_burst;
         }
 
-        xhci_endpoint_context_t* epc = (xhci_endpoint_context_t*)&xhci->input_context[(index + 2) * xhci->context_size];
+        xhci_endpoint_context_t* epc = (xhci_endpoint_context_t*)&wt->input_context[(index + 2) * xhci->context_size];
         memset((void*)epc, 0, xhci->context_size);
         // allocate a transfer ring for the endpoint
         mx_status_t status = xhci_endpoint_init(ep, TRANSFER_RING_SIZE);
         if (status < 0) {
-            mtx_unlock(&xhci->input_context_lock);
-            return status;
+            goto out;
         }
 
         mx_paddr_t tr_dequeue = xhci_transfer_ring_start_phys(&slot->eps[index].transfer_ring);
@@ -591,19 +677,21 @@ mx_status_t xhci_enable_endpoint(xhci_t* xhci, uint32_t slot_id, usb_endpoint_de
         XHCI_WRITE32(&icc->drop_context_flags, XHCI_ICC_EP_FLAG(index));
     }
 
-    mx_status_t status = xhci_send_command(xhci, TRB_CMD_CONFIGURE_EP, icc_phys,
-                                           (slot_id << TRB_SLOT_ID_START));
-    mtx_unlock(&xhci->input_context_lock);
+    status = xhci_send_command(xhci, TRB_CMD_CONFIGURE_EP, icc_phys,
+                               (slot_id << TRB_SLOT_ID_START));
 
     // xhci_stop_endpoint() will handle the !enable case
     if (status == MX_OK && enable) {
         ep->transfer_state = calloc(1, sizeof(xhci_transfer_state_t));
         if (!ep->transfer_state) {
-            return MX_ERR_NO_MEMORY;
+            status = MX_ERR_NO_MEMORY;
+            goto out;
         }
         ep->state = EP_STATE_RUNNING;
     }
 
+out:
+    xhci_return_worker_thread(wt);
     return status;
 }
 
@@ -623,10 +711,17 @@ mx_status_t xhci_configure_hub(xhci_t* xhci, uint32_t slot_id, usb_speed_t speed
         ttt = (descriptor->wHubCharacteristics >> 5) & 3;
     }
 
-    mtx_lock(&xhci->input_context_lock);
-    xhci_input_control_context_t* icc = (xhci_input_control_context_t*)xhci->input_context;
-    mx_paddr_t icc_phys = xhci->input_context_phys;
-    xhci_slot_context_t* sc = (xhci_slot_context_t*)&xhci->input_context[1 * xhci->context_size];
+    // we perform this action synchronously
+    // we only use the worker thread for its DMA buffer
+    xhci_worker_thread_t* wt;
+    mx_status_t status = xhci_get_worker_thread(xhci, &wt);
+    if (status != MX_OK) {
+        return status;
+    }
+
+    xhci_input_control_context_t* icc = (xhci_input_control_context_t*)wt->input_context;
+    mx_paddr_t icc_phys = wt->input_context_phys;
+    xhci_slot_context_t* sc = (xhci_slot_context_t*)&wt->input_context[1 * xhci->context_size];
     memset((void*)icc, 0, xhci->context_size);
     memset((void*)sc, 0, xhci->context_size);
 
@@ -640,13 +735,12 @@ mx_status_t xhci_configure_hub(xhci_t* xhci, uint32_t slot_id, usb_speed_t speed
     XHCI_SET_BITS32(&sc->sc2, SLOT_CTX_TTT_START, SLOT_CTX_TTT_BITS, ttt);
 
 
-    mx_status_t status = xhci_send_command(xhci, TRB_CMD_EVAL_CONTEXT, icc_phys,
-                                           (slot_id << TRB_SLOT_ID_START));
-    mtx_unlock(&xhci->input_context_lock);
+    status = xhci_send_command(xhci, TRB_CMD_EVAL_CONTEXT, icc_phys,
+                               (slot_id << TRB_SLOT_ID_START));
 
     if (status != MX_OK) {
         printf("TRB_CMD_EVAL_CONTEXT failed\n");
-        return status;
+        goto out;
     }
 
     if (speed == USB_SPEED_SUPER) {
@@ -666,5 +760,7 @@ mx_status_t xhci_configure_hub(xhci_t* xhci, uint32_t slot_id, usb_speed_t speed
         }
     }
 
-    return MX_OK;
+out:
+    xhci_return_worker_thread(wt);
+    return status;
 }

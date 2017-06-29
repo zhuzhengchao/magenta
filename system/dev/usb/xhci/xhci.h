@@ -60,7 +60,7 @@ typedef struct {
     xhci_ep_state_t state;
 } xhci_endpoint_t;
 
-typedef struct xhci_slot {
+typedef struct {
     // buffer for our device context
     io_buffer_t buffer;
     xhci_slot_context_t* sc;
@@ -73,6 +73,7 @@ typedef struct xhci_slot {
 } xhci_slot_t;
 
 typedef struct xhci xhci_t;
+typedef struct xhci_worker_thread xhci_worker_thread_t;
 
 typedef void (*xhci_command_complete_cb)(void* data, uint32_t cc, xhci_trb_t* command_trb,
                                          xhci_trb_t* event_trb);
@@ -111,6 +112,10 @@ struct xhci {
     mtx_t command_ring_lock;
     xhci_command_context_t* command_contexts[COMMAND_RING_SIZE];
 
+    list_node_t busy_worker_threads;
+    list_node_t idle_worker_threads;
+    mtx_t worker_threads_lock;
+
     // One event ring for now, but we will have multiple if we use multiple interruptors
 #define INTERRUPTOR_COUNT 1
     xhci_event_ring_t event_rings[INTERRUPTOR_COUNT];
@@ -140,20 +145,14 @@ struct xhci {
     // Pointer to the USB Legacy Support Capability, if present.
     xhci_usb_legacy_support_cap_t* usb_legacy_support_cap;
 
-    // device thread stuff
-    thrd_t device_thread;
     xhci_slot_t* slots;
 
+/*
     // for command processing in xhci-device-manager.c
     list_node_t command_queue;
     mtx_t command_queue_mutex;
     completion_t command_queue_completion;
-
-    // DMA buffers used by xhci_device_thread in xhci-device-manager.c
-    uint8_t* input_context;
-    mx_paddr_t input_context_phys;
-    mtx_t input_context_lock;
-
+*/
     // for xhci_get_current_frame()
     mtx_t mfindex_mutex;
     // number of times mfindex has wrapped
@@ -164,9 +163,6 @@ struct xhci {
     // VMO buffer for DCBAA and ERST array
     mx_handle_t dcbaa_erst_handle;
     mx_vaddr_t dcbaa_erst_virt;
-    // VMO buffer for input context
-    mx_handle_t input_context_handle;
-    mx_vaddr_t input_context_virt;
     // VMO buffer for scratch pad pages
     mx_handle_t scratch_pad_pages_handle;
     mx_vaddr_t scratch_pad_pages_virt;

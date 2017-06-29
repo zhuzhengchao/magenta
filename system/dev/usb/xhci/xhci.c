@@ -5,7 +5,6 @@
 #include <hw/reg.h>
 #include <magenta/types.h>
 #include <magenta/syscalls.h>
-#include <magenta/process.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,9 +13,10 @@
 #include <unistd.h>
 
 #include "xhci.h"
-#include "xhci-device-manager.h"
 #include "xhci-root-hub.h"
 #include "xhci-transfer.h"
+#include "xhci-util.h"
+#include "xhci-worker-thread.h"
 
 //#define TRACE 1
 #include "xhci-debug.h"
@@ -139,60 +139,16 @@ static mx_status_t xhci_claim_ownership(xhci_t* xhci) {
     return MX_OK;
 }
 
-static mx_status_t xhci_vmo_init(size_t size, mx_handle_t* out_handle, mx_vaddr_t* out_virt,
-                                 bool contiguous) {
-    mx_status_t status;
-    mx_handle_t handle;
-
-    if (contiguous) {
-        status = mx_vmo_create_contiguous(get_root_resource(), size, 0, &handle);
-    } else {
-        status = mx_vmo_create(size, 0, &handle);
-    }
-    if (status != MX_OK) {
-        printf("xhci_vmo_init: vmo_create failed: %d\n", status);
-        return status;
-    }
-
-    if (!contiguous) {
-        // needs to be done before MX_VMO_OP_LOOKUP for non-contiguous VMOs
-        status = mx_vmo_op_range(handle, MX_VMO_OP_COMMIT, 0, size, NULL, 0);
-        if (status != MX_OK) {
-            printf("xhci_vmo_init: mx_vmo_op_range(MX_VMO_OP_COMMIT) failed %d\n", status);
-            mx_handle_close(handle);
-            return status;
-        }
-    }
-
-    status = mx_vmar_map(mx_vmar_root_self(), 0, handle, 0, size,
-                         MX_VM_FLAG_PERM_READ | MX_VM_FLAG_PERM_WRITE, out_virt);
-    if (status != MX_OK) {
-        printf("xhci_vmo_init: mx_vmar_map failed: %d\n", status);
-        mx_handle_close(handle);
-        return status;
-    }
-
-    *out_handle = handle;
-    return MX_OK;
-}
-
-static void xhci_vmo_release(mx_handle_t handle, mx_vaddr_t virt) {
-    uint64_t size;
-    mx_vmo_get_size(handle, &size);
-    mx_vmar_unmap(mx_vmar_root_self(), virt, size);
-    mx_handle_close(handle);
-}
-
 mx_status_t xhci_init(xhci_t* xhci, void* mmio) {
     mx_status_t result = MX_OK;
     mx_paddr_t* phys_addrs = NULL;
 
-    list_initialize(&xhci->command_queue);
+    list_initialize(&xhci->busy_worker_threads);
+    list_initialize(&xhci->idle_worker_threads);
+
     mtx_init(&xhci->command_ring_lock, mtx_plain);
-    mtx_init(&xhci->command_queue_mutex, mtx_plain);
+    mtx_init(&xhci->worker_threads_lock, mtx_plain);
     mtx_init(&xhci->mfindex_mutex, mtx_plain);
-    mtx_init(&xhci->input_context_lock, mtx_plain);
-    completion_reset(&xhci->command_queue_completion);
 
     xhci->cap_regs = (xhci_cap_regs_t*)mmio;
     xhci->op_regs = (xhci_op_regs_t*)((uint8_t*)xhci->cap_regs + xhci->cap_regs->length);
@@ -253,11 +209,6 @@ mx_status_t xhci_init(xhci_t* xhci, void* mmio) {
         printf("xhci_vmo_init failed for xhci->dcbaa_erst_handle\n");
         goto fail;
     }
-    result = xhci_vmo_init(PAGE_SIZE, &xhci->input_context_handle, &xhci->input_context_virt, false);
-    if (result != MX_OK) {
-        printf("xhci_vmo_init failed for xhci->input_context_handle\n");
-        goto fail;
-    }
 
     if (scratch_pad_bufs > 0) {
         size_t scratch_pad_pages_size = scratch_pad_bufs * xhci->page_size;
@@ -282,13 +233,6 @@ mx_status_t xhci_init(xhci_t* xhci, void* mmio) {
                              &xhci->dcbaa_phys, sizeof(xhci->dcbaa_phys));
     if (result != MX_OK) {
         printf("mx_vmo_op_range failed for xhci->dcbaa_erst_handle\n");
-        goto fail;
-    }
-    xhci->input_context = (uint8_t *)xhci->input_context_virt;
-    result = mx_vmo_op_range(xhci->input_context_handle, MX_VMO_OP_LOOKUP, 0, PAGE_SIZE,
-                             &xhci->input_context_phys, sizeof(xhci->input_context_phys));
-    if (result != MX_OK) {
-        printf("mx_vmo_op_range failed for xhci->input_context_handle\n");
         goto fail;
     }
 
@@ -356,7 +300,6 @@ fail:
     xhci_event_ring_free(xhci, 0);
     xhci_transfer_ring_free(&xhci->command_ring);
     xhci_vmo_release(xhci->dcbaa_erst_handle, xhci->dcbaa_erst_virt);
-    xhci_vmo_release(xhci->input_context_handle, xhci->input_context_virt);
     xhci_vmo_release(xhci->scratch_pad_pages_handle, xhci->scratch_pad_pages_virt);
     xhci_vmo_release(xhci->scratch_pad_index_handle, xhci->scratch_pad_index_virt);
     free(phys_addrs);
@@ -457,8 +400,6 @@ void xhci_start(xhci_t* xhci) {
     uint32_t start_flags = USBCMD_RS | USBCMD_INTE | USBCMD_EWE;
     XHCI_SET32(usbcmd, start_flags, start_flags);
     xhci_wait_bits(usbsts, USBSTS_HCH, 0);
-
-    xhci_start_device_thread(xhci);
 }
 
 void xhci_post_command(xhci_t* xhci, uint32_t command, uint64_t ptr, uint32_t control_bits,

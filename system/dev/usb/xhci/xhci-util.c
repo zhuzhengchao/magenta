@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <magenta/process.h>
 #include <stdio.h>
 
 #include "xhci-util.h"
@@ -65,4 +66,48 @@ mx_status_t xhci_send_command(xhci_t* xhci, uint32_t cmd, uint64_t ptr, uint32_t
     }
 
     return status;
+}
+
+mx_status_t xhci_vmo_init(size_t size, mx_handle_t* out_handle, mx_vaddr_t* out_virt,
+                          bool contiguous) {
+    mx_status_t status;
+    mx_handle_t handle;
+
+    if (contiguous) {
+        status = mx_vmo_create_contiguous(get_root_resource(), size, 0, &handle);
+    } else {
+        status = mx_vmo_create(size, 0, &handle);
+    }
+    if (status != MX_OK) {
+        printf("xhci_vmo_init: vmo_create failed: %d\n", status);
+        return status;
+    }
+
+    if (!contiguous) {
+        // needs to be done before MX_VMO_OP_LOOKUP for non-contiguous VMOs
+        status = mx_vmo_op_range(handle, MX_VMO_OP_COMMIT, 0, size, NULL, 0);
+        if (status != MX_OK) {
+            printf("xhci_vmo_init: mx_vmo_op_range(MX_VMO_OP_COMMIT) failed %d\n", status);
+            mx_handle_close(handle);
+            return status;
+        }
+    }
+
+    status = mx_vmar_map(mx_vmar_root_self(), 0, handle, 0, size,
+                         MX_VM_FLAG_PERM_READ | MX_VM_FLAG_PERM_WRITE, out_virt);
+    if (status != MX_OK) {
+        printf("xhci_vmo_init: mx_vmar_map failed: %d\n", status);
+        mx_handle_close(handle);
+        return status;
+    }
+
+    *out_handle = handle;
+    return MX_OK;
+}
+
+void xhci_vmo_release(mx_handle_t handle, mx_vaddr_t virt) {
+    uint64_t size;
+    mx_vmo_get_size(handle, &size);
+    mx_vmar_unmap(mx_vmar_root_self(), virt, size);
+    mx_handle_close(handle);
 }

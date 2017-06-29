@@ -28,3 +28,7 @@ static inline int xhci_sync_command_slot_id(xhci_sync_command_t* command) {
 
 // executes a command with a 1 second timeout
 mx_status_t xhci_send_command(xhci_t* xhci, uint32_t command, uint64_t ptr, uint32_t control_bits);
+
+mx_status_t xhci_vmo_init(size_t size, mx_handle_t* out_handle, mx_vaddr_t* out_virt,
+                          bool contiguous);
+void xhci_vmo_release(mx_handle_t handle, mx_vaddr_t virt);

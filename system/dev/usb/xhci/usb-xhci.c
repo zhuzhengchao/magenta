@@ -15,10 +15,10 @@
 #include <string.h>
 #include <threads.h>
 
-#include "xhci-device-manager.h"
+#include "xhci.h"
 #include "xhci-root-hub.h"
 #include "xhci-util.h"
-#include "xhci.h"
+#include "xhci-worker-thread.h"
 
 //#define TRACE 1
 #include "xhci-debug.h"
