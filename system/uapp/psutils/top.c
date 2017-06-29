@@ -172,8 +172,8 @@ static void sort_threads(enum sort_order order) {
 
 static void print_threads(void) {
     thread_info_t* e;
-    printf("%8s %8s %10s %5s %6s %6s %s\n",
-           "PID", "TID", raw_time ? "TIME_NS" : "TIME%", "STATE", "SYS", "SYST", "NAME");
+    printf("%8s %8s %10s %5s %6s %6s %6s %s\n",
+           "PID", "TID", raw_time ? "TIME_NS" : "TIME%", "STATE", "SYS", "SYST", "PAGEF", "NAME");
 
     int i = 0;
     list_for_every_entry (&thread_list, e, thread_info_t, node) {
@@ -186,16 +186,18 @@ static void print_threads(void) {
             if (e->delta_time > 0)
                 percent = e->delta_time / (double)delay * 100;
 
-            printf("%8lu %8lu %10.2f %5s %6lu %6lu %s:%s\n",
+            printf("%8lu %8lu %10.2f %5s %6lu %6lu %6lu %s:%s\n",
                    e->proc_koid, e->koid, percent, state_string(&e->info),
                    e->stats.syscalls - e->last_stats.syscalls,
                    e->stats.syscall_timeouts - e->last_stats.syscall_timeouts,
+                   e->stats.page_faults - e->last_stats.page_faults,
                    e->proc_name, e->name);
         } else {
-            printf("%8lu %8lu %10lu %5s %6lu %6lu %s:%s\n",
+            printf("%8lu %8lu %10lu %5s %6lu %6lu %6lu %s:%s\n",
                    e->proc_koid, e->koid, e->delta_time, state_string(&e->info),
                    e->stats.syscalls - e->last_stats.syscalls,
                    e->stats.syscall_timeouts - e->last_stats.syscall_timeouts,
+                   e->stats.page_faults - e->last_stats.page_faults,
                    e->proc_name, e->name);
         }
 
