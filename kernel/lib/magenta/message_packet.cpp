@@ -13,6 +13,44 @@
 #include <magenta/handle_reaper.h>
 #include <magenta/magenta.h>
 #include <mxcpp/new.h>
+#include <mxtl/atomic.h>
+
+#define MAGENTA_CHANNEL_STATS 1
+#if MAGENTA_CHANNEL_STATS
+#include <lib/heap.h>
+#include <platform.h>
+namespace {
+static mxtl::atomic<lk_time_t> next_dump_time(0);
+
+static mxtl::atomic_uint_fast64_t total_data_size(0);
+static mxtl::atomic_uint_fast64_t high_water(0);
+void _incr_data_size(uint64_t data_size) {
+    uint64_t total = total_data_size.fetch_add(data_size) + data_size;
+    uint64_t hwm = high_water.load();
+    if (total > hwm) {
+        high_water.compare_exchange_strong(&hwm, total,
+                                           mxtl::memory_order_seq_cst,
+                                           mxtl::memory_order_seq_cst);
+        hwm = total;
+    }
+
+    lk_time_t now = current_time();
+    if (hwm == total || now >= next_dump_time.load()) {
+        next_dump_time.store(now + MX_SEC(1));
+        size_t heap_size;
+        size_t heap_free;
+        heap_get_info(&heap_size, &heap_free);
+        printf("CHAN: t=%" PRIu64 " ds=%" PRIu64 " hwm=%" PRIu64 " hs=%zu\n",
+               now, total, hwm, heap_size - heap_free);
+    }
+}
+#define incr_data_size(data_size) (_incr_data_size(data_size))
+#define decr_data_size(data_size) (total_data_size.fetch_sub(data_size))
+} // namespace
+#else // !MAGENTA_CHANNEL_STATS
+#define incr_data_size(data_size) ((void)data_size)
+#define decr_data_size(data_size) ((void)data_size)
+#endif
 
 // static
 mx_status_t MessagePacket::NewPacket(uint32_t data_size, uint32_t num_handles,
@@ -35,6 +73,7 @@ mx_status_t MessagePacket::NewPacket(uint32_t data_size, uint32_t num_handles,
     if (ptr == nullptr) {
         return MX_ERR_NO_MEMORY;
     }
+    incr_data_size(data_size);
 
     // The storage space for the Handle*s is not initialized because the only
     // creators of MessagePackets (sys_channel_write and _call) fill that array
@@ -82,6 +121,7 @@ MessagePacket::~MessagePacket() {
         // destruction behavior.
         ReapHandles(handles_, num_handles_);
     }
+    decr_data_size(data_size_);
 }
 
 MessagePacket::MessagePacket(uint32_t data_size,
