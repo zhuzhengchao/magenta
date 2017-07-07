@@ -57,6 +57,15 @@ void timer_initialize(timer_t *);
 void timer_set_oneshot(timer_t *, lk_time_t deadline, timer_callback, void *arg);
 bool timer_cancel(timer_t *);
 
+/* Similar to timer_set_oneshot, with additional constraints:
+ * - Will reset a currently active timer
+ * - Must be called with interrupts disabled
+ * - Must be running on the cpu that the timer is set to fire on (if currently set)
+ * - Cannot be called from the timer itself
+ */
+void timer_reset_oneshot_local(timer_t *timer, lk_time_t deadline, timer_callback callback, void *arg);
+
+/* Internal routines used when bringing cpus online/offline */
 void timer_transition_off_cpu(uint old_cpu);
 void timer_thaw_percpu(void);
 
