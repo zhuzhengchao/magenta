@@ -91,6 +91,9 @@ mx_status_t sys_interrupt_wait(mx_handle_t handle_value) {
     if (status != MX_OK)
         return status;
 
+    // TODO: remove this hack and have the scheduler handle this with a temporary boost
+    thread_set_priority(HIGH_PRIORITY);
+
     return interrupt->WaitForInterrupt();
 }
 
