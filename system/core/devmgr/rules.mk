@@ -12,8 +12,13 @@ MODULE_NAME := devmgr
 
 MODULE_TYPE := userapp
 
+ifeq ($(ENABLE_ACPI_BUS),true)
+    MODULE_DEFINES += ACPI_BUS_DRV=1
+else
+    MODULE_SRCS += $(LOCAL_DIR)/acpi.c
+endif
+
 MODULE_SRCS += \
-    $(LOCAL_DIR)/acpi.c \
     $(LOCAL_DIR)/dnode.cpp \
     $(LOCAL_DIR)/devhost-shared.c \
     $(LOCAL_DIR)/devmgr.c \

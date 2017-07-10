@@ -18,7 +18,10 @@
 #include <magenta/device/dmctl.h>
 #include <mxio/io.h>
 
+#if !ACPI_BUS_DRV
 #include "acpi.h"
+#endif
+
 #include "devcoordinator.h"
 #include "devmgr.h"
 #include "log.h"
@@ -73,7 +76,9 @@ static mx_status_t handle_dmctl_write(size_t len, const char* cmd) {
     }
     if ((len == 6) && !memcmp(cmd, "reboot", 6)) {
         devmgr_vfs_exit();
+#if !ACPI_BUS_DRV
         devhost_acpi_reboot();
+#endif
         return MX_OK;
     }
     if ((len == 7) && !memcmp(cmd, "drivers", 7)) {
@@ -83,7 +88,9 @@ static mx_status_t handle_dmctl_write(size_t len, const char* cmd) {
     if (len == 8) {
         if (!memcmp(cmd, "poweroff", 8) || !memcmp(cmd, "shutdown", 8)) {
             devmgr_vfs_exit();
+#if !ACPI_BUS_DRV
             devhost_acpi_poweroff();
+#endif
             return MX_OK;
         }
         if (!memcmp(cmd, "ktraceon", 8)) {
@@ -104,7 +111,9 @@ static mx_status_t handle_dmctl_write(size_t len, const char* cmd) {
         char arg[len - 8];
         memcpy(arg, cmd + 9, len - 9);
         arg[len - 9] = 0;
+#if !ACPI_BUS_DRV
         devhost_acpi_ps0(arg);
+#endif
         return MX_OK;
     }
     if ((len > 12) && !memcmp(cmd, "kerneldebug ", 12)) {
@@ -198,6 +207,19 @@ static device_t misc_device = {
     .refcount = 1,
 };
 
+#if ACPI_BUS_DRV
+static device_t acpi_device = {
+    .flags = DEV_CTX_IMMORTAL | DEV_CTX_BUSDEV,
+    .protocol_id = MX_PROTOCOL_ACPI_BUS,
+    .name = "acpi",
+    .libname = "",
+    .args = "acpi,,",
+    .children = LIST_INITIAL_VALUE(acpi_device.children),
+    .pending = LIST_INITIAL_VALUE(acpi_device.pending),
+    .refcount = 1,
+};
+#endif
+
 static device_t platform_device = {
     .flags = DEV_CTX_IMMORTAL | DEV_CTX_BUSDEV,
     .protocol_id = MX_PROTOCOL_PLATFORM_BUS,
@@ -257,6 +279,9 @@ static void dc_dump_device(device_t* dev, size_t indent) {
 static void dc_dump_state(void) {
     dc_dump_device(&root_device, 0);
     dc_dump_device(&misc_device, 1);
+#if ACPI_BUS_DEV
+    dc_dump_device(&acpi_device, 1);
+#endif
     if (platform_device.hrsrc != MX_HANDLE_INVALID) {
         dc_dump_device(&platform_device, 1);
     }
@@ -318,6 +343,9 @@ static void dc_dump_device_props(device_t* dev) {
 static void dc_dump_devprops(void) {
     dc_dump_device_props(&root_device);
     dc_dump_device_props(&misc_device);
+#if ACPI_BUS_DEV
+    dc_dump_device_props(&acpi_device);
+#endif
     if (platform_device.hrsrc != MX_HANDLE_INVALID) {
         dc_dump_device_props(&platform_device);
     }
@@ -1269,6 +1297,14 @@ static bool is_root_driver(driver_t* drv) {
         (memcmp(&root_device_binding, drv->binding, sizeof(root_device_binding)) == 0);
 }
 
+#if ACPI_BUS_DEV
+static bool is_acpi_bus_driver(driver_t* drv) {
+    // only our built-in acpi driver should bind as acpi bus
+    // so compare library path instead of binding program
+    return !strcmp(drv->libname, "/boot/driver/bus-acpi.so");
+}
+#endif
+
 static bool is_platform_bus_driver(driver_t* drv) {
     // only our built-in platform-bus driver should bind as platform bus
     // so compare library path instead of binding program
@@ -1310,6 +1346,7 @@ device_t* coordinator_init(mx_handle_t root_job) {
 
 //TODO: The acpisvc needs to become the acpi bus device
 //      For now, we launch it manually here so PCI can work
+#if !ACPI_BUS_DRV
 static void acpi_init(void) {
     mx_status_t status = devhost_launch_acpisvc(devhost_job);
     if (status != MX_OK) {
@@ -1321,6 +1358,7 @@ static void acpi_init(void) {
     // it, it will fail later.
     devhost_init_pcie();
 }
+#endif
 
 void dc_bind_driver(driver_t* drv) {
     if (dc_running) {
@@ -1330,6 +1368,10 @@ void dc_bind_driver(driver_t* drv) {
         dc_attempt_bind(drv, &root_device);
     } else if (is_misc_driver(drv)) {
         dc_attempt_bind(drv, &misc_device);
+#if ACPI_BUS_DEV
+    } else if (is_acpi_bus_driver(drv)) {
+        dc_attempt_bind(drv, &acpi_device);
+#endif
     } else if (is_platform_bus_driver(drv) &&
                (platform_device.hrsrc != MX_HANDLE_INVALID)) {
         dc_attempt_bind(drv, &platform_device);
@@ -1393,10 +1435,15 @@ void coordinator(void) {
     if (getenv("devmgr.verbose")) {
         log_flags |= LOG_DEVLC;
     }
+#if !ACPI_BUS_DRV
     acpi_init();
+#endif
 
     devfs_publish(&root_device, &misc_device);
     devfs_publish(&root_device, &socket_device);
+#if ACPI_BUS_DRV
+    devfs_publish(&root_device, &acpi_device);
+#endif
     if (platform_device.hrsrc != MX_HANDLE_INVALID) {
         devfs_publish(&root_device, &platform_device);
     }
