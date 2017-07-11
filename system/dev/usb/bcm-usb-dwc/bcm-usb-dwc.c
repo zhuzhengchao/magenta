@@ -14,6 +14,7 @@
 #include <ddk/binding.h>
 #include <ddk/common/usb.h>
 #include <ddk/device.h>
+#include <ddk/io-buffer.h>
 #include <ddk/protocol/usb-bus.h>
 #include <ddk/protocol/usb-hci.h>
 #include <ddk/protocol/usb.h>
@@ -1694,6 +1695,8 @@ finish:
     return retval;
 }
 
+static io_buffer_t buffer;
+
 // Bind is the entry point for this driver.
 static mx_status_t usb_dwc_bind(void* ctx, mx_device_t* dev, void** cookie) {
     xprintf("usb_dwc_bind dev = %p\n", dev);
@@ -1714,6 +1717,16 @@ static mx_status_t usb_dwc_bind(void* ctx, mx_device_t* dev, void** cookie) {
     usb_dwc->next_device_address = 1;
     usb_dwc->DBG_reqid = 0x1;
 
+    // map the mailbox registers.
+    st = io_buffer_init_physical(&buffer, USB_PAGE_START, USB_PAGE_SIZE, get_root_resource(),
+                                 MX_CACHE_POLICY_UNCACHED_DEVICE);
+    if (st != MX_OK) {
+        xprintf("usb_dwc_bind failed to mx_mmap_device_memory.\n");
+        goto error_return;
+    }
+    regs = io_buffer_virt(&buffer);
+
+/*
     // Carve out some address space for this device.
     st = mx_mmap_device_memory(
         get_root_resource(), USB_PAGE_START, (uint32_t)USB_PAGE_SIZE,
@@ -1722,6 +1735,7 @@ static mx_status_t usb_dwc_bind(void* ctx, mx_device_t* dev, void** cookie) {
         xprintf("usb_dwc_bind failed to mx_mmap_device_memory.\n");
         goto error_return;
     }
+*/
 
     // Create an IRQ Handle for this device.
     irq_handle = mx_interrupt_create(get_root_resource(), INTERRUPT_VC_USB,

@@ -11,6 +11,7 @@
 #include <ddk/device.h>
 #include <ddk/driver.h>
 #include <ddk/binding.h>
+#include <ddk/io-buffer.h>
 #include <ddk/protocol/bcm-bus.h>
 #include <ddk/protocol/display.h>
 #include <ddk/protocol/platform-device.h>
@@ -109,6 +110,7 @@ typedef struct {
 
 // clang-format on
 
+static io_buffer_t mailbox_buffer;
 static volatile uint32_t* mailbox_regs;
 
 // All devices are initially turned off.
@@ -297,24 +299,21 @@ static bcm_bus_protocol_ops_t bcm_bus_protocol = {
 };
 
 static mx_status_t mailbox_bind(void* ctx, mx_device_t* parent, void** cookie) {
-    uintptr_t page_base;
-
     platform_device_protocol_t pdp;
     if (device_get_protocol(parent, MX_PROTOCOL_PLATFORM_DEV, &pdp) != MX_OK) {
         return MX_ERR_NOT_SUPPORTED;
     }
 
-    // Carve out some address space for the device -- it's memory mapped.
-    mx_status_t status = mx_mmap_device_memory(
-        get_root_resource(),
-        MAILBOX_PAGE_ADDRESS, MAILBOX_REGS_LENGTH,
-        MX_CACHE_POLICY_UNCACHED_DEVICE, &page_base);
-
-    if (status != MX_OK)
+    // map the mailbox registers.
+    mx_status_t status = io_buffer_init_physical(&mailbox_buffer, MAILBOX_PAGE_ADDRESS,
+                                                 MAILBOX_REGS_LENGTH, get_root_resource(),
+                                                 MX_CACHE_POLICY_UNCACHED_DEVICE);
+    if (status != MX_OK) {
         return status;
+    }
 
     // The device is actually mapped at some offset into the page.
-    mailbox_regs = (uint32_t*)(page_base + PAGE_REG_DELTA);
+    mailbox_regs = (uint32_t*)(io_buffer_virt(&mailbox_buffer) + PAGE_REG_DELTA);
 
     device_add_args_t vc_rpc_args = {
         .version = DEVICE_ADD_ARGS_VERSION,
