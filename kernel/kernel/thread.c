@@ -1030,7 +1030,7 @@ status_t thread_sleep_etc(lk_time_t deadline, bool interruptable)
     current_thread->blocked_status = MX_OK;
 
     current_thread->interruptable = interruptable;
-    sched_block();
+    sched_sleep();
     current_thread->interruptable = false;
 
     blocked_status = current_thread->blocked_status;

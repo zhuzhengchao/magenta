@@ -225,7 +225,6 @@ thread_t *sched_get_top_thread(uint cpu)
     return &percpu[cpu].idle_thread;
 }
 
-/* make sure the thread is already put in a non running state and invoke the scheduler */
 void sched_block(void)
 {
     DEBUG_ASSERT(spin_lock_held(&thread_lock));
@@ -305,6 +304,25 @@ void sched_yield(void)
 
     insert_in_run_queue_tail(current_thread);
 
+    _thread_resched_internal();
+}
+
+/* make sure the thread is already put in a sleep state and invoke the scheduler */
+void sched_sleep(void)
+{
+    DEBUG_ASSERT(spin_lock_held(&thread_lock));
+
+    __UNUSED thread_t *current_thread = get_current_thread();
+
+    DEBUG_ASSERT(current_thread->magic == THREAD_MAGIC);
+    DEBUG_ASSERT(current_thread->state == THREAD_SLEEPING);
+
+    LOCAL_KTRACE0("sched_sleep");
+
+    /* drop a priority towards neutral */
+    deboost_thread(current_thread, -1, 0);
+
+    /* we are blocking on something. the blocking code should have already stuck us on a queue */
     _thread_resched_internal();
 }
 

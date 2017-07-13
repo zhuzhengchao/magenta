@@ -15,6 +15,7 @@
 void sched_init_early(void);
 
 void sched_block(void);
+void sched_sleep(void);
 void sched_unblock(thread_t *t);
 void sched_unblock_list(struct list_node *list);
 void sched_wake(thread_t *t);
