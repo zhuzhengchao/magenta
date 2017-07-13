@@ -354,7 +354,7 @@ status_t thread_suspend(thread_t *t)
             if (t->interruptable) {
                 t->blocked_status = MX_ERR_INTERNAL_INTR_RETRY;
 
-                sched_unblock(t);
+                sched_wake(t);
             }
             break;
     }
@@ -606,7 +606,7 @@ void thread_kill(thread_t *t, bool block)
             if (t->interruptable) {
                 t->blocked_status = MX_ERR_INTERNAL_INTR_KILLED;
 
-                sched_unblock(t);
+                sched_wake(t);
             }
             break;
         case THREAD_DEATH:
@@ -977,7 +977,7 @@ static enum handler_return thread_sleep_handler(timer_t *timer, lk_time_t now, v
 
     t->blocked_status = MX_OK;
 
-    sched_unblock(t);
+    sched_wake(t);
 
     spin_unlock(&thread_lock);
 

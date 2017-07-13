@@ -52,53 +52,60 @@ static int effec_priority(const thread_t *t)
     return ep;
 }
 
-/* boost the priority of the thread by +1 */
-static void boost_thread(thread_t *t)
+/* boost the priority of the thread by adjust, keeping the result under or at the ceiling */
+static void boost_thread(thread_t *t, int adjust, int boost_ceiling)
 {
+    DEBUG_ASSERT(adjust > 0);
+
     if (NO_BOOST)
         return;
 
     if (unlikely(thread_is_real_time_or_idle(t)))
         return;
 
-    if (t->priority_boost < MAX_PRIORITY_ADJ &&
-        likely((t->base_priority + t->priority_boost) < HIGHEST_PRIORITY)) {
-        t->priority_boost++;
-    }
+    /* if we're already topped out or above topped out, leave it alone */
+    if (t->priority_boost >= boost_ceiling)
+        return;
+
+    /* make sure we dont boost past the ceiling */
+    int new_boost = t->priority_boost + adjust;
+    if (new_boost > boost_ceiling)
+        new_boost = boost_ceiling;
+
+    /* make sure we dont boost a thread too far */
+    if (unlikely(t->base_priority + new_boost > HIGHEST_PRIORITY))
+        new_boost = HIGHEST_PRIORITY - t->base_priority;
+
+    /* boost */
+    t->priority_boost = new_boost;
 }
 
-/* deboost the priority of the thread by -1.
- * If deboosting because the thread is using up all of its time slice,
- * then allow the boost to go negative, otherwise only deboost to 0.
- */
-static void deboost_thread(thread_t *t, bool quantum_expiration)
+/* boost the priority of the thread by adjust, keeping the result above or at the floor */
+static void deboost_thread(thread_t *t, int adjust, int boost_floor)
 {
+    DEBUG_ASSERT(adjust < 0);
+
     if (NO_BOOST)
         return;
 
     if (unlikely(thread_is_real_time_or_idle(t)))
         return;
-
-    int boost_floor;
-    if (quantum_expiration) {
-        /* deboost into negative boost */
-        boost_floor = -MAX_PRIORITY_ADJ;
-
-        /* make sure we dont deboost a thread too far */
-        if (unlikely(t->base_priority + boost_floor < LOWEST_PRIORITY))
-            boost_floor = t->base_priority - LOWEST_PRIORITY;
-
-    } else {
-        /* otherwise only deboost to 0 */
-        boost_floor = 0;
-    }
 
     /* if we're already bottomed out or below bottomed out, leave it alone */
     if (t->priority_boost <= boost_floor)
         return;
 
-    /* drop a level */
-    t->priority_boost--;
+    /* make sure we dont deboost past the floor */
+    int new_boost = t->priority_boost + adjust;
+    if (new_boost < boost_floor)
+        new_boost = boost_floor;
+
+    /* make sure we dont deboost a thread too far */
+    if (unlikely(t->base_priority + new_boost < LOWEST_PRIORITY))
+        new_boost = -(t->base_priority - LOWEST_PRIORITY);
+
+    /* deboost */
+    t->priority_boost = new_boost;
 }
 
 /* pick a 'random' cpu */
@@ -218,6 +225,7 @@ thread_t *sched_get_top_thread(uint cpu)
     return &percpu[cpu].idle_thread;
 }
 
+/* make sure the thread is already put in a non running state and invoke the scheduler */
 void sched_block(void)
 {
     DEBUG_ASSERT(spin_lock_held(&thread_lock));
@@ -233,6 +241,7 @@ void sched_block(void)
     _thread_resched_internal();
 }
 
+/* put the thread back in a ready state and boost its priority */
 void sched_unblock(thread_t *t)
 {
     DEBUG_ASSERT(spin_lock_held(&thread_lock));
@@ -242,7 +251,7 @@ void sched_unblock(thread_t *t)
     LOCAL_KTRACE0("sched_unblock");
 
     /* thread is being woken up, boost its priority */
-    boost_thread(t);
+    boost_thread(t, 1, MAX_PRIORITY_ADJ);
 
     /* stuff the new thread in the run queue */
     t->state = THREAD_READY;
@@ -251,6 +260,7 @@ void sched_unblock(thread_t *t)
     mp_reschedule(find_cpu(t), 0);
 }
 
+/* put a list of threads back in a ready state and boost their priority */
 void sched_unblock_list(struct list_node *list)
 {
     DEBUG_ASSERT(list);
@@ -265,7 +275,7 @@ void sched_unblock_list(struct list_node *list)
         DEBUG_ASSERT(!thread_is_idle(t));
 
         /* thread is being woken up, boost its priority */
-        boost_thread(t);
+        boost_thread(t, 1, MAX_PRIORITY_ADJ);
 
         /* stuff the new thread in the run queue */
         t->state = THREAD_READY;
@@ -275,6 +285,7 @@ void sched_unblock_list(struct list_node *list)
     }
 }
 
+/* current thread is voluntarily giving up its time slice and deboosting its priority to neutral */
 void sched_yield(void)
 {
     DEBUG_ASSERT(spin_lock_held(&thread_lock));
@@ -288,10 +299,37 @@ void sched_yield(void)
 
     /* consume the rest of the time slice, deboost ourself, and go to the end of the queue */
     current_thread->remaining_time_slice = 0;
-    deboost_thread(current_thread, false);
+
+    /* deboost only to the neutral boost */
+    deboost_thread(current_thread, -1, 0);
+
     insert_in_run_queue_tail(current_thread);
 
     _thread_resched_internal();
+}
+
+/* wake this thread from sleep and boost its priority to neutral */
+void sched_wake(thread_t *t)
+{
+    DEBUG_ASSERT(spin_lock_held(&thread_lock));
+
+    DEBUG_ASSERT(t->magic == THREAD_MAGIC);
+    DEBUG_ASSERT(t->state == THREAD_SLEEPING);
+
+    LOCAL_KTRACE0("sched_wake");
+
+    /* boost ourself to only up to neutral boost */
+    boost_thread(t, 1, 0);
+
+    /* stuff the new thread in the run queue */
+    t->state = THREAD_READY;
+    if (t->remaining_time_slice > 0) {
+        insert_in_run_queue_head(t);
+    } else {
+        insert_in_run_queue_tail(t);
+    }
+
+    mp_reschedule(find_cpu(t), 0);
 }
 
 /* the current thread is being preempted from interrupt context */
@@ -311,7 +349,7 @@ void sched_preempt(void)
             insert_in_run_queue_head(current_thread);
         } else {
             /* if we're out of quantum, deboost the thread and put it at the tail of the queue */
-            deboost_thread(current_thread, true);
+            deboost_thread(current_thread, -1, -MAX_PRIORITY_ADJ);
             insert_in_run_queue_tail(current_thread);
         }
     }
@@ -333,8 +371,8 @@ void sched_reschedule(void)
     /* idle thread doesn't go in the run queue */
     if (likely(!thread_is_idle(current_thread))) {
 
-        /* deboost the current thread */
-        deboost_thread(current_thread, false);
+        /* deboost the current thread down to neutral boost */
+        deboost_thread(current_thread, -1, 0);
 
         if (current_thread->remaining_time_slice > 0) {
             insert_in_run_queue_head(current_thread);
