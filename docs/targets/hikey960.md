@@ -61,12 +61,7 @@ In order to flash the board, it will need to be connected to your workstation vi
 
 To install Magenta, the HiKey960 will need to be placed in fastboot mode.  This can be done in one of two ways:
 
-1. Using the DIP switches on the back of the board.  To place in fastboot mode the switches should be in the following positions:
-
-        Auto Power up(Switch 1)   closed/ON
-        Recovery(Switch 2)        open/OFF
-        Fastboot(Switch 3)        closed/ON
-
+ 
     Once the switches are in these positions, either cycle power or reset the board and it will boot into fastboot mode, awaiting for commands from the host.  This can be done with the jumper wire on pin 6 mentioned earlier in these instructions.
 
 2. If the board is reset, then reset again immediately after seeing the the following messages on the console:

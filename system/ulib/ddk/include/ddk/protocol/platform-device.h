@@ -4,8 +4,8 @@
 
 #pragma once
 
-#include <ddk/driver.h>
 #include <magenta/compiler.h>
+#include <magenta/types.h>
 
 __BEGIN_CDECLS;
 
@@ -15,6 +15,9 @@ __BEGIN_CDECLS;
 // interface registered by the platform bus implementation driver
 typedef struct {
     mx_status_t (*get_protocol)(void* ctx, uint32_t proto_id, void* out);
+    mx_status_t (*add_gpios)(void* ctx, uint32_t start, uint32_t count, uint32_t mmio_index,
+                             const uint32_t* irqs, uint32_t irq_count);
+
     // TODO(voydanoff) Add APIs for GPIOs, clocks I2C, etc
 } pbus_interface_ops_t;
 
