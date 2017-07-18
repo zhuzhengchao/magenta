@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <threads.h>
+#include <unistd.h>
 
 #include <ddk/device.h>
 #include <ddk/driver.h>
@@ -153,6 +154,34 @@ static mx_protocol_device_t hi3660_device_protocol = {
     .release = hi3660_release,
 };
 
+
+// thread that cycles the 4 LEDs on the hikey 960 board
+static int led_test_thread(void *arg) {
+    mx_device_t* parent = arg;
+
+    gpio_protocol_t gpio;
+    if (device_get_protocol(parent, MX_PROTOCOL_GPIO, &gpio) != MX_OK) {
+        printf("led_test_thread: could not get GPIO protocol!\n");
+        return MX_ERR_INTERNAL;
+    }
+
+    uint32_t led_gpios[] = { 150, 151, 189, 190 };
+
+    for (unsigned i = 0; i < countof(led_gpios); i++) {
+        gpio_config(&gpio, led_gpios[i], GPIO_DIR_OUT);
+    }
+
+    while (1) {
+         for (unsigned i = 0; i < countof(led_gpios); i++) {
+            gpio_write(&gpio, led_gpios[i], 1);
+            sleep(1);
+            gpio_write(&gpio, led_gpios[i], 0);
+        }
+    }
+
+    return 0;
+}
+
 static mx_status_t hi3660_bind(void* ctx, mx_device_t* parent, void** cookie) {
     platform_device_protocol_t pdev;
     if (device_get_protocol(parent, MX_PROTOCOL_PLATFORM_DEV, &pdev) != MX_OK) {
@@ -186,6 +215,11 @@ static mx_status_t hi3660_bind(void* ctx, mx_device_t* parent, void** cookie) {
     intf.ops = &hi3660_bus_ops;
     intf.ctx = bus;
     pdev_set_interface(&pdev, &intf);
+
+#if 1
+    thrd_t thrd;
+    thrd_create_with_name(&thrd, led_test_thread, parent, "led_test_thread");
+#endif
 
     return MX_OK;
 }
