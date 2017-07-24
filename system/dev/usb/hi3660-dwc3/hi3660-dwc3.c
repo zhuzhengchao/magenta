@@ -5,9 +5,13 @@
 #include <ddk/binding.h>
 #include <ddk/device.h>
 #include <ddk/protocol/platform-device.h>
+#include <hw/reg.h>
 
 #include <stdlib.h>
 #include <stdio.h>
+
+#include "dwc3-regs.h"
+#include "hi3660-regs.h"
 
 // MMIO indices
 enum {
@@ -17,6 +21,12 @@ enum {
     MMIO_PCTRL,
     MMIO_SCTRL,
     MMIO_PMCTRL,
+};
+
+// IRQ indices
+enum {
+    IRQ_USB3,
+    IRQ_USB3_OTG,
 };
 
 typedef struct {
@@ -29,6 +39,32 @@ typedef struct {
     pdev_mmio_buffer_t sctrl;
     pdev_mmio_buffer_t pmctrl;
 } hi3360_dwc3_t;
+
+
+static mx_status_t hi3360_dwc3_init(hi3360_dwc3_t* dwc) {
+
+    volatile void* peri_crg = dwc->peri_crg.vaddr;
+    volatile void* pctrl = dwc->pctrl.vaddr;
+ 
+	/* usb refclk iso enable */
+	writel(USB_REFCLK_ISO_EN, peri_crg + PERI_CRG_ISODIS);
+
+	/* enable usb_tcxo_en */
+	writel(USB_TCXO_EN | (USB_TCXO_EN << PERI_CTRL3_MSK_START),
+			pctrl + PCTRL_PERI_CTRL3);
+
+	/* select usbphy clk from abb */
+	uint32_t temp = readl(pctrl + PCTRL_PERI_CTRL24);
+	temp &= ~SC_CLK_USB3PHY_3MUX1_SEL;
+	writel(temp, pctrl + PCTRL_PERI_CTRL24);
+
+	/* open clk gate */
+	writel(GT_CLK_USB3OTG_REF | GT_ACLK_USB3OTG,
+			peri_crg + PERI_CRG_CLK_EN4);
+
+
+    return MX_OK;
+}
 
 static void hi3360_dwc3_release(void* ctx) {
     hi3360_dwc3_t* dwc = ctx;
@@ -74,6 +110,12 @@ static mx_status_t hi3360_dwc3_bind(void* ctx, mx_device_t* dev, void** cookie) 
                                        &dwc->pmctrl)) != MX_OK) {
         goto fail;
     }
+
+//    if ((status = hi3360_dwc3_init(dwc)) != MX_OK) {
+//        goto fail;
+//    }
+
+//	writel(0x1c466e3, dwc->usb3otg_bc.vaddr + USBOTG3_CTRL4);
 
     device_add_args_t args = {
         .version = DEVICE_ADD_ARGS_VERSION,
