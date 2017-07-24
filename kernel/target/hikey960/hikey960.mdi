@@ -117,4 +117,42 @@ platform = {
             }
         }
     }
+    device = {
+        name = "hi3660-dwc3"
+        did = 1
+        mmios = {
+            {
+                name = "USB3OTG"
+                base-phys = 0xff100000
+                length = 0x100000
+            }
+            {
+                name = "USB3OTG_BC"
+                base-phys = 0xff200000
+                length = 0x1000
+            }
+            // TODO(voydanoff) the remaining MMIO ranges should move to the bus node
+            // since they will likely be used by drivers for other devices
+            {
+                name = "PERI_CRG"
+                base-phys = 0xfff35000
+                length = 0x1000
+            }
+            {
+                name = "PCTRL"
+                base-phys = 0xe8a09000
+                length = 0x1000
+            }
+            {
+                name = "SCTRL"
+                base-phys = 0xfff0a000
+                length = 0x1000
+            }
+            {
+                name = "PMCTRL"
+                base-phys = 0xfff31000
+                length = 0x1000
+            }
+        }
+    }
 }
