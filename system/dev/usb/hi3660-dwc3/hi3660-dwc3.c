@@ -6,6 +6,7 @@
 #include <ddk/device.h>
 #include <ddk/protocol/platform-device.h>
 #include <hw/reg.h>
+#include <pretty/hexdump.h>
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -43,9 +44,62 @@ typedef struct {
 
 static mx_status_t hi3360_dwc3_init(hi3360_dwc3_t* dwc) {
 
+    volatile void* usb3otg_bc = dwc->usb3otg_bc.vaddr;
     volatile void* peri_crg = dwc->peri_crg.vaddr;
     volatile void* pctrl = dwc->pctrl.vaddr;
  
+	writel(PERRSTEN4_USB3OTG, peri_crg + PERI_CRG_PERRSTEN4);
+	writel(PERRSTEN4_USB3OTGPHY_POR, peri_crg + PERI_CRG_PERRSTEN4);
+	writel(PERRSTEN4_USB3OTG_MUX | PERRSTEN4_USB3OTG_AHBIF | PERRSTEN4_USB3OTG_32K, peri_crg + PERI_CRG_PERRSTEN4);
+	writel(PEREN4_GT_ACLK_USB3OTG | PEREN4_GT_CLK_USB3OTG_REF, peri_crg + PERI_CRG_PERDIS4);
+
+	writel(~PCTRL_CTRL24_USB3PHY_3MUX1_SEL, pctrl + PCTRL_CTRL24);
+	writel((PCTRL_CTRL3_USB_TXCO_EN << 16) | 0, pctrl + PCTRL_CTRL3);
+
+    mx_nanosleep(mx_deadline_after(MX_MSEC(10)));
+
+// release part
+    mx_nanosleep(mx_deadline_after(MX_MSEC(10)));
+
+   /* enable USB REFCLK ISO */
+	writel(PERISOEN_USB_REFCLK_ISO_EN, peri_crg + PERI_CRG_ISODIS);
+ 
+  /* enable USB_TXCO_EN */
+	writel((PCTRL_CTRL3_USB_TXCO_EN << 16) | PCTRL_CTRL3_USB_TXCO_EN, pctrl + PCTRL_CTRL3);
+
+	writel(~PCTRL_CTRL24_USB3PHY_3MUX1_SEL, pctrl + PCTRL_CTRL24);
+	writel(PEREN4_GT_ACLK_USB3OTG | PEREN4_GT_CLK_USB3OTG_REF, peri_crg + PERI_CRG_PEREN4);
+	writel(PERRSTEN4_USB3OTG_MUX | PERRSTEN4_USB3OTG_AHBIF | PERRSTEN4_USB3OTG_32K, peri_crg + PERI_CRG_PERRSTDIS4);
+
+	writel(PERRSTEN4_USB3OTG | PERRSTEN4_USB3OTGPHY_POR, peri_crg + PERI_CRG_PERRSTEN4);
+
+
+  /* enable PHY REF CLK */
+    uint32_t temp = readl(usb3otg_bc + USBOTG3_CTRL0);
+ 	writel(temp | USB3OTG_CTRL0_SC_USB3PHY_ABB_GT_EN, usb3otg_bc + USBOTG3_CTRL0);
+
+    temp = readl(usb3otg_bc + USBOTG3_CTRL7);
+ 	writel(temp | USB3OTG_CTRL7_REF_SSP_EN, usb3otg_bc + USBOTG3_CTRL7);
+
+  /* exit from IDDQ mode */
+    temp = readl(usb3otg_bc + USBOTG3_CTRL2);
+ 	writel(temp & ~(USB3OTG_CTRL2_TEST_POWERDOWN_SSP | USB3OTG_CTRL2_TEST_POWERDOWN_HSP), usb3otg_bc + USBOTG3_CTRL2);
+
+    mx_nanosleep(mx_deadline_after(MX_MSEC(10)));
+
+	writel(PERRSTEN4_USB3OTGPHY_POR, peri_crg + PERI_CRG_PERRSTDIS4);
+	writel(PERRSTEN4_USB3OTG, peri_crg + PERI_CRG_PERRSTDIS4);
+
+    mx_nanosleep(mx_deadline_after(MX_MSEC(10)));
+
+    temp = readl(usb3otg_bc + USBOTG3_CTRL3);
+ 	writel(temp | USB3OTG_CTRL3_VBUSVLDEXT | USB3OTG_CTRL3_VBUSVLDEXTSEL, usb3otg_bc + USBOTG3_CTRL7);
+
+    mx_nanosleep(mx_deadline_after(MX_MSEC(10)));
+
+	writel(0x1c466e3, usb3otg_bc + USBOTG3_CTRL4);
+ 
+ #if 0
 	/* usb refclk iso enable */
 	writel(USB_REFCLK_ISO_EN, peri_crg + PERI_CRG_ISODIS);
 
@@ -62,7 +116,7 @@ static mx_status_t hi3360_dwc3_init(hi3360_dwc3_t* dwc) {
 	writel(GT_CLK_USB3OTG_REF | GT_ACLK_USB3OTG,
 			peri_crg + PERI_CRG_CLK_EN4);
 
-
+#endif
     return MX_OK;
 }
 
@@ -111,9 +165,27 @@ static mx_status_t hi3360_dwc3_bind(void* ctx, mx_device_t* dev, void** cookie) 
         goto fail;
     }
 
-//    if ((status = hi3360_dwc3_init(dwc)) != MX_OK) {
-//        goto fail;
-//    }
+
+printf("call hi3360_dwc3_init\n");
+    if ((status = hi3360_dwc3_init(dwc)) != MX_OK) {
+        goto fail;
+    }
+printf("did hi3360_dwc3_init\n");
+
+
+/*
+    printf("usb3otg_bc:\n");
+    hexdump8(dwc->usb3otg_bc.vaddr, 256);
+    printf("peri_crg:\n");
+    hexdump8(dwc->peri_crg.vaddr, 256);
+*/
+
+    printf("usbotg:\n");
+    hexdump8(dwc->usb3otg.vaddr, 256);
+    printf("global registers:\n");
+    hexdump(dwc->usb3otg.vaddr + GSBUSCFG0, 256);
+    printf("device registers:\n");
+    hexdump(dwc->usb3otg.vaddr + DCFG, 256);
 
 //	writel(0x1c466e3, dwc->usb3otg_bc.vaddr + USBOTG3_CTRL4);
 

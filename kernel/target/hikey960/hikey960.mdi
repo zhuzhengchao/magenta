@@ -155,6 +155,8 @@ platform = {
             }
         }
         irqs = [ 191 /* USB3 */,
-                 193 /* USB3_OTG */ ]
+                 193 /* USB3_OTG */,
+                 194 /* USB3_BC */,
+               ]
     }
 }
