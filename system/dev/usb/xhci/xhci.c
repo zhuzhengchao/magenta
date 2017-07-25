@@ -18,7 +18,7 @@
 #include "xhci-root-hub.h"
 #include "xhci-transfer.h"
 
-//#define TRACE 1
+#define TRACE 1
 #include "xhci-debug.h"
 
 #define PAGE_ROUNDUP(x) ((x + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1))
@@ -193,6 +193,7 @@ mx_status_t xhci_init(xhci_t* xhci, void* mmio) {
     mx_status_t result = MX_OK;
     mx_paddr_t* phys_addrs = NULL;
 
+printf("xhci_init 1\n");
     list_initialize(&xhci->command_queue);
     mtx_init(&xhci->command_ring_lock, mtx_plain);
     mtx_init(&xhci->command_queue_mutex, mtx_plain);
@@ -200,10 +201,16 @@ mx_status_t xhci_init(xhci_t* xhci, void* mmio) {
     mtx_init(&xhci->input_context_lock, mtx_plain);
     completion_reset(&xhci->command_queue_completion);
 
+printf("xhci_init 2\n");
     xhci->cap_regs = (xhci_cap_regs_t*)mmio;
+printf("xhci->cap_regs %p\n", xhci->cap_regs);
+printf("xhci->cap_regs->length %u\n", xhci->cap_regs->length);
     xhci->op_regs = (xhci_op_regs_t*)((uint8_t*)xhci->cap_regs + xhci->cap_regs->length);
+printf("xhci->op_regs %p\n", xhci->op_regs);
     xhci->doorbells = (uint32_t*)((uint8_t*)xhci->cap_regs + xhci->cap_regs->dboff);
+printf("xhci->doorbells %p\n", xhci->doorbells);
     xhci->runtime_regs = (xhci_runtime_regs_t*)((uint8_t*)xhci->cap_regs + xhci->cap_regs->rtsoff);
+printf("xhci->runtime_regs %p\n", xhci->runtime_regs);
     volatile uint32_t* hcsparams1 = &xhci->cap_regs->hcsparams1;
     volatile uint32_t* hcsparams2 = &xhci->cap_regs->hcsparams2;
     volatile uint32_t* hccparams1 = &xhci->cap_regs->hccparams1;
@@ -211,12 +218,17 @@ mx_status_t xhci_init(xhci_t* xhci, void* mmio) {
 
     xhci->max_slots = XHCI_GET_BITS32(hcsparams1, HCSPARAMS1_MAX_SLOTS_START,
                                       HCSPARAMS1_MAX_SLOTS_BITS);
+printf("xhci->max_slots %zu\n", xhci->max_slots);
     xhci->max_interruptors = XHCI_GET_BITS32(hcsparams1, HCSPARAMS1_MAX_INTRS_START,
                                              HCSPARAMS1_MAX_INTRS_BITS);
+printf("xhci->max_interruptors %zu\n", xhci->max_interruptors);
     xhci->rh_num_ports = XHCI_GET_BITS32(hcsparams1, HCSPARAMS1_MAX_PORTS_START,
                                          HCSPARAMS1_MAX_PORTS_BITS);
+printf("xhci->rh_num_ports %u\n", xhci->rh_num_ports);
     xhci->context_size = (XHCI_READ32(hccparams1) & HCCPARAMS1_CSZ ? 64 : 32);
+printf("xhci->context_size %zu\n", xhci->context_size);
     xhci->large_esit = !!(XHCI_READ32(hccparams2) & HCCPARAMS2_LEC);
+printf("xhci->large_esit %u\n", xhci->large_esit);
 
     uint32_t scratch_pad_bufs = XHCI_GET_BITS32(hcsparams2, HCSPARAMS2_MAX_SBBUF_HI_START,
                                                 HCSPARAMS2_MAX_SBBUF_HI_BITS);
@@ -224,6 +236,7 @@ mx_status_t xhci_init(xhci_t* xhci, void* mmio) {
     scratch_pad_bufs |= XHCI_GET_BITS32(hcsparams2, HCSPARAMS2_MAX_SBBUF_LO_START,
                                         HCSPARAMS2_MAX_SBBUF_LO_BITS);
     xhci->page_size = XHCI_READ32(&xhci->op_regs->pagesize) << 12;
+printf("xhci->page_size %zu\n", xhci->page_size);
 
     // allocate array to hold our slots
     // add 1 to allow 1-based indexing of slots
@@ -571,10 +584,12 @@ static void xhci_handle_events(xhci_t* xhci, int interruptor) {
 }
 
 void xhci_handle_interrupt(xhci_t* xhci) {
+
     volatile uint32_t* usbsts = &xhci->op_regs->usbsts;
     const int interruptor = 0;
 
     uint32_t status = XHCI_READ32(usbsts);
+printf("xhci_handle_interrupt status %p: %08X\n", usbsts, status);
     uint32_t clear = status & USBSTS_CLEAR_BITS;
     XHCI_WRITE32(usbsts, clear);
 

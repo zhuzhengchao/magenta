@@ -88,7 +88,31 @@
 #define GSBUSCFG1           0xc104              // Global SoC Bus Configuration Register 1
 #define GTXTHRCFG           0xc108              // Global Tx Threshold Control Register
 #define GRXTHRCFG           0xc10c              // Global Rx Threshold Control Register
+
 #define GCTL                0xc110              // Global Core Control Register
+#define GCTL_PWRDNSCALE_START   19
+#define GCTL_PWRDNSCALE_BITS    13
+#define GCTL_MASTERFILTBYPASS   (1 << 18)
+#define GCTL_BYPSSETADDR        (1 << 17)
+#define GCTL_U2RSTECN           (1 << 16)
+#define GCTL_FRMSCLDWN_START    14
+#define GCTL_FRMSCLDWN_BITS     2
+#define GCTL_PRTCAPDIR_START    12
+#define GCTL_PRTCAPDIR_BITS     2
+#define GCTL_PRTCAPDIR_HOST     (1 << GCTL_PRTCAPDIR_START)
+#define GCTL_PRTCAPDIR_DEVICE   (2 << GCTL_PRTCAPDIR_START)
+#define GCTL_PRTCAPDIR_OTG      (3 << GCTL_PRTCAPDIR_START)
+#define GCTL_PRTCAPDIR_MASK     (3 << GCTL_PRTCAPDIR_START)
+#define GCTL_CORESOFTRESET      (1 << 11)
+#define GCTL_U1_U2_TIMER_SCALE  (1 << 9)
+#define GCTL_DEBUGATTACH        (1 << 8)
+#define GCTL_SCALEDOWN_START    4
+#define GCTL_SCALEDOWN_BITS     2
+#define GCTL_DISSCRAMBLE        (1 << 3)
+#define GCTL_U2EXIT_LFPS        (1 << 2)
+#define GCTL_GBL_HIBERNATION_EN (1 << 1)
+#define GCTL_DSBLCLKGTNG        (1 << 0)
+
 #define GPMSTS              0xc114              // Global Power Management Status Register
 #define GSTS                0xc118              // Global Status Register
 #define GUCTL1              0xc11c              // Global User Control Register 1

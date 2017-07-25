@@ -29,7 +29,6 @@ enum {
 enum {
     IRQ_USB3,
     IRQ_USB3_OTG,
-    IRQ_USB3_BC,
 };
 
 typedef struct {
@@ -197,7 +196,6 @@ static mx_status_t hi3360_dwc3_bind(void* ctx, mx_device_t* dev, void** cookie) 
         goto fail;
     }
 
-
 printf("call hi3360_dwc3_init\n");
     if ((status = hi3360_dwc3_init(dwc)) != MX_OK) {
         goto fail;
@@ -212,18 +210,27 @@ printf("did hi3360_dwc3_init\n");
     hexdump8(dwc->peri_crg.vaddr, 256);
 */
 
+    // set host mode
+printf("set host mode\n");
+    volatile void* usb3otg = dwc->usb3otg.vaddr;
+    uint32_t temp = readl(usb3otg + GCTL);
+    temp &= ~GCTL_PRTCAPDIR_MASK;
+    temp |= GCTL_PRTCAPDIR_HOST;
+    writel(temp, usb3otg + GCTL);
+printf("GCTL: %08X\n", temp);
+
+
     printf("usbotg:\n");
-    hexdump8(dwc->usb3otg.vaddr, 256);
+    hexdump(dwc->usb3otg.vaddr, 256);
     printf("global registers:\n");
     hexdump(dwc->usb3otg.vaddr + GSBUSCFG0, 256);
     printf("device registers:\n");
     hexdump(dwc->usb3otg.vaddr + DCFG, 256);
 
-//	writel(0x1c466e3, dwc->usb3otg_bc.vaddr + USBOTG3_CTRL4);
 
     device_add_args_t args = {
         .version = DEVICE_ADD_ARGS_VERSION,
-        .name = "hi3600-dwc3",
+        .name = "dwc3-xhci",
         .ctx = dwc,
         .ops = &hi3360_dwc3_device_proto,
         .proto_id = MX_PROTOCOL_USB_XHCI,

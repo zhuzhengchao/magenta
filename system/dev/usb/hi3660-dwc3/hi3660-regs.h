@@ -92,4 +92,3 @@
 #define USB3OTG_PHY_CR_READ                     (1 << 2)
 #define USB3OTG_PHY_CR_CAP_DATA                 (1 << 1)
 #define USB3OTG_PHY_CR_CAP_ADDR                 (1 << 0)
-

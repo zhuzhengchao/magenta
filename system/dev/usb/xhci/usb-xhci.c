@@ -15,13 +15,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <threads.h>
+#include <unistd.h>
 
 #include "xhci-device-manager.h"
 #include "xhci-root-hub.h"
 #include "xhci-util.h"
 #include "xhci.h"
 
-//#define TRACE 1
+#define TRACE 1
 #include "xhci-debug.h"
 
 #define MAX_SLOTS 255
@@ -194,6 +195,7 @@ static int xhci_irq_thread(void* arg) {
     mx_thread_set_priority(24 /* HIGH_PRIORITY in LK */);
 
     while (1) {
+/*
         mx_status_t wait_res;
 
         wait_res = mx_interrupt_wait(xhci->irq_handle);
@@ -203,30 +205,36 @@ static int xhci_irq_thread(void* arg) {
             break;
         }
 
-        mx_interrupt_complete(xhci->irq_handle);
+        mx_interrupt_complete(xhci->irq_handle)
+*/
         xhci_handle_interrupt(xhci);
+sleep(1);
     }
     xprintf("xhci_irq_thread done\n");
     return 0;
 }
 
 static mx_status_t usb_xhci_bind(void* ctx, mx_device_t* dev, void** cookie) {
+printf("usb_xhci_bind\n");
     mx_handle_t irq_handle = MX_HANDLE_INVALID;
     xhci_t* xhci = NULL;
     mx_status_t status;
 
     usb_xhci_protocol_t xhci_proto;
     if (device_get_protocol(dev, MX_PROTOCOL_USB_XHCI, &xhci_proto)) {
+printf("usb_xhci_bind MX_ERR_NOT_SUPPORTED\n");
         status = MX_ERR_NOT_SUPPORTED;
         goto error_return;
     }
 
     xhci = calloc(1, sizeof(xhci_t));
     if (!xhci) {
+printf("usb_xhci_bind MX_ERR_NO_MEMORY\n");
         status = MX_ERR_NO_MEMORY;
         goto error_return;
     }
 
+printf("usb_xhci_bind aa\n");
     void* mmio;
     uint64_t mmio_len;
     /*
@@ -238,6 +246,7 @@ static mx_status_t usb_xhci_bind(void* ctx, mx_device_t* dev, void** cookie) {
         printf("usb_xhci_bind: usb_xhci_get_mmio failed\n");
         goto error_return;
     }
+printf("usb_xhci_bind 2\n");
 
     // register for interrupts
     status = usb_xhci_get_interrupt(&xhci_proto, 0, &irq_handle);
@@ -246,16 +255,20 @@ static mx_status_t usb_xhci_bind(void* ctx, mx_device_t* dev, void** cookie) {
         goto error_return;
     }
 
+printf("usb_xhci_bind 3\n");
+
     xhci->irq_handle = irq_handle;
     xhci->legacy_irq_mode = usb_xhci_legacy_irq_mode(&xhci_proto);
 
     // stash this here for the startup thread to call device_add() with
     xhci->parent = dev;
 
+printf("call xhci_init\n");
     status = xhci_init(xhci, mmio);
     if (status != MX_OK) {
         goto error_return;
     }
+printf("usb_xhci_bind 4\n");
 
     thrd_t thread;
     thrd_create_with_name(&thread, xhci_irq_thread, xhci, "xhci_irq_thread");
@@ -264,6 +277,7 @@ static mx_status_t usb_xhci_bind(void* ctx, mx_device_t* dev, void** cookie) {
     return MX_OK;
 
 error_return:
+printf("bind failed\n");
     if (xhci) {
         free(xhci);
     }
