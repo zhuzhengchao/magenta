@@ -5,6 +5,7 @@
 #include <ddk/binding.h>
 #include <ddk/driver.h>
 #include <ddk/protocol/usb-hci.h>
+#include <ddk/protocol/usb-xhci.h>
 #include <ddk/protocol/usb.h>
 
 #include <hw/reg.h>
@@ -150,9 +151,8 @@ static void xhci_unbind(void* ctx) {
 }
 
 static void xhci_release(void* ctx) {
-     xhci_t* xhci = ctx;
-
-   // FIXME(voydanoff) - there is a lot more work to do here
+    xhci_t* xhci = ctx;
+    mx_handle_close(xhci->irq_handle);
     free(xhci);
 }
 
@@ -204,7 +204,7 @@ static int xhci_irq_thread(void* arg) {
         }
 
         mx_interrupt_complete(xhci->irq_handle);
-        xhci_handle_interrupt(xhci, xhci->legacy_irq_mode);
+        xhci_handle_interrupt(xhci);
     }
     xprintf("xhci_irq_thread done\n");
     return 0;
@@ -212,13 +212,11 @@ static int xhci_irq_thread(void* arg) {
 
 static mx_status_t usb_xhci_bind(void* ctx, mx_device_t* dev, void** cookie) {
     mx_handle_t irq_handle = MX_HANDLE_INVALID;
-    mx_handle_t mmio_handle = MX_HANDLE_INVALID;
-    mx_handle_t cfg_handle = MX_HANDLE_INVALID;
     xhci_t* xhci = NULL;
     mx_status_t status;
 
-    pci_protocol_t pci;
-    if (device_get_protocol(dev, MX_PROTOCOL_PCI, &pci)) {
+    usb_xhci_protocol_t xhci_proto;
+    if (device_get_protocol(dev, MX_PROTOCOL_USB_XHCI, &xhci_proto)) {
         status = MX_ERR_NOT_SUPPORTED;
         goto error_return;
     }
@@ -235,46 +233,21 @@ static mx_status_t usb_xhci_bind(void* ctx, mx_device_t* dev, void** cookie) {
      * eXtensible Host Controller Interface revision 1.1, section 5, xhci
      * should only use BARs 0 and 1. 0 for 32 bit addressing, and 0+1 for 64 bit addressing.
      */
-    status = pci_map_resource(&pci, PCI_RESOURCE_BAR_0, MX_CACHE_POLICY_UNCACHED_DEVICE,
-                              &mmio, &mmio_len, &mmio_handle);
+    status = usb_xhci_get_mmio(&xhci_proto, &mmio, &mmio_len);
     if (status != MX_OK) {
-        printf("usb_xhci_bind could not find bar\n");
-        status = MX_ERR_INTERNAL;
+        printf("usb_xhci_bind: usb_xhci_get_mmio failed\n");
         goto error_return;
-    }
-
-    // enable bus master
-    status = pci_enable_bus_master(&pci, true);
-    if (status < 0) {
-        printf("usb_xhci_bind enable_bus_master failed %d\n", status);
-        goto error_return;
-    }
-
-    // select our IRQ mode
-    status = pci_set_irq_mode(&pci, MX_PCIE_IRQ_MODE_MSI, 1);
-    if (status < 0) {
-        mx_status_t status_legacy = pci_set_irq_mode(&pci, MX_PCIE_IRQ_MODE_LEGACY, 1);
-
-        if (status_legacy < 0) {
-            printf("usb_xhci_bind Failed to set IRQ mode to either MSI "
-                   "(err = %d) or Legacy (err = %d)\n",
-                   status, status_legacy);
-            goto error_return;
-        }
-
-        xhci->legacy_irq_mode = true;
     }
 
     // register for interrupts
-    status = pci_map_interrupt(&pci, 0, &irq_handle);
+    status = usb_xhci_get_interrupt(&xhci_proto, 0, &irq_handle);
     if (status != MX_OK) {
-        printf("usb_xhci_bind map_interrupt failed %d\n", status);
+        printf("usb_xhci_bind: usb_xhci_get_interrupt failed %d\n", status);
         goto error_return;
     }
 
     xhci->irq_handle = irq_handle;
-    xhci->mmio_handle = mmio_handle;
-    xhci->cfg_handle = cfg_handle;
+    xhci->legacy_irq_mode = usb_xhci_legacy_irq_mode(&xhci_proto);
 
     // stash this here for the startup thread to call device_add() with
     xhci->parent = dev;
@@ -297,12 +270,6 @@ error_return:
     if (irq_handle != MX_HANDLE_INVALID) {
         mx_handle_close(irq_handle);
     }
-    if (mmio_handle != MX_HANDLE_INVALID) {
-        mx_handle_close(mmio_handle);
-    }
-    if (cfg_handle != MX_HANDLE_INVALID) {
-        mx_handle_close(cfg_handle);
-    }
     return status;
 }
 
@@ -312,9 +279,6 @@ static mx_driver_ops_t xhci_driver_ops = {
 };
 
 // clang-format off
-MAGENTA_DRIVER_BEGIN(usb_xhci, xhci_driver_ops, "magenta", "0.1", 4)
-    BI_ABORT_IF(NE, BIND_PROTOCOL, MX_PROTOCOL_PCI),
-    BI_ABORT_IF(NE, BIND_PCI_CLASS, 0x0C),
-    BI_ABORT_IF(NE, BIND_PCI_SUBCLASS, 0x03),
-    BI_MATCH_IF(EQ, BIND_PCI_INTERFACE, 0x30),
+MAGENTA_DRIVER_BEGIN(usb_xhci, xhci_driver_ops, "magenta", "0.1", 1)
+    BI_MATCH_IF(EQ, BIND_PROTOCOL, MX_PROTOCOL_USB_XHCI),
 MAGENTA_DRIVER_END(usb_xhci)

@@ -570,7 +570,7 @@ static void xhci_handle_events(xhci_t* xhci, int interruptor) {
     }
 }
 
-void xhci_handle_interrupt(xhci_t* xhci, bool legacy) {
+void xhci_handle_interrupt(xhci_t* xhci) {
     volatile uint32_t* usbsts = &xhci->op_regs->usbsts;
     const int interruptor = 0;
 
@@ -580,7 +580,7 @@ void xhci_handle_interrupt(xhci_t* xhci, bool legacy) {
 
     // If we are in legacy IRQ mode, clear the IP (Interrupt Pending) bit
     // from the IMAN register of our interrupter.
-    if (legacy) {
+    if (xhci->legacy_irq_mode) {
         xhci_intr_regs_t* intr_regs = &xhci->runtime_regs->intr_regs[interruptor];
         XHCI_SET32(&intr_regs->iman, IMAN_IP, IMAN_IP);
     }
