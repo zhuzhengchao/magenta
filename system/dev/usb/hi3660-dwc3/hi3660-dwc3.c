@@ -5,6 +5,7 @@
 #include <ddk/binding.h>
 #include <ddk/device.h>
 #include <ddk/protocol/platform-device.h>
+#include <ddk/protocol/usb-xhci.h>
 #include <hw/reg.h>
 #include <pretty/hexdump.h>
 
@@ -28,6 +29,7 @@ enum {
 enum {
     IRQ_USB3,
     IRQ_USB3_OTG,
+    IRQ_USB3_BC,
 };
 
 typedef struct {
@@ -131,6 +133,36 @@ static void hi3360_dwc3_release(void* ctx) {
     free(dwc);
 }
 
+static mx_status_t hi3360_dwc3_get_mmio(void* ctx, void** out_vaddr, size_t* out_length) {
+    hi3360_dwc3_t* dwc = ctx;
+    *out_vaddr = dwc->usb3otg.vaddr;
+    *out_length = dwc->usb3otg.size;
+    return MX_OK;
+}
+
+static uint32_t hi3360_dwc3_get_interrupt_count(void* ctx) {
+    return 1;
+}
+
+static mx_status_t hi3360_dwc3_get_interrupt(void* ctx, uint32_t index, mx_handle_t* out_handle) {
+    hi3360_dwc3_t* dwc = ctx;
+    if (index != 0) {
+        return MX_ERR_INVALID_ARGS;
+    }
+    return pdev_map_interrupt(&dwc->pdev, 0, out_handle);
+}
+
+static bool hi3360_dwc3_legacy_irq_mode(void* ctx) {
+    return false;
+}
+
+usb_xhci_protocol_ops_t xhci_protocol = {
+    .get_mmio = hi3360_dwc3_get_mmio,
+    .get_interrupt_count = hi3360_dwc3_get_interrupt_count,
+    .get_interrupt = hi3360_dwc3_get_interrupt,
+    .legacy_irq_mode = hi3360_dwc3_legacy_irq_mode,
+};
+
 static mx_protocol_device_t hi3360_dwc3_device_proto = {
     .version = DEVICE_OPS_VERSION,
     .release = hi3360_dwc3_release,
@@ -194,6 +226,8 @@ printf("did hi3360_dwc3_init\n");
         .name = "hi3600-dwc3",
         .ctx = dwc,
         .ops = &hi3360_dwc3_device_proto,
+        .proto_id = MX_PROTOCOL_USB_XHCI,
+        .proto_ops = &xhci_protocol,
     };
 
     status = device_add(dev, &args, &dwc->mxdev);
