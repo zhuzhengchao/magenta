@@ -9,6 +9,12 @@
 #include <mxtl/auto_lock.h>
 #include <mxtl/mutex.h>
 
+#ifndef _KERNEL
+#include <magenta/assert.h>
+#define DEBUG_ASSERT(args...) MX_DEBUG_ASSERT(args)
+#define thread_reschedule() ((void)0)
+#endif
+
 using mxtl::AutoLock;
 
 namespace {

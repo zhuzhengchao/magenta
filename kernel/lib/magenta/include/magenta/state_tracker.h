@@ -8,12 +8,16 @@
 
 #include <stdint.h>
 
-#include <kernel/spinlock.h>
 #include <magenta/state_observer.h>
 #include <magenta/types.h>
 #include <mxtl/canary.h>
 #include <mxtl/intrusive_double_list.h>
 #include <mxtl/mutex.h>
+
+#undef TA_GUARDED
+#undef TA_REQ
+#define TA_GUARDED(args...) /**/
+#define TA_REQ(args...) /**/
 
 class Handle;
 
