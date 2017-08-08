@@ -13,7 +13,9 @@ MODULE_NAME := magenta-isolate-test
 MODULE_SRCS += \
 	$(LOCAL_DIR)/main.cpp \
 	kernel/lib/magenta/dispatcher.cpp \
+	kernel/lib/magenta/channel_dispatcher.cpp \
 	kernel/lib/magenta/event_dispatcher.cpp \
+	kernel/lib/magenta/message_packet.cpp \
 	kernel/lib/magenta/handle.cpp \
 	kernel/lib/magenta/state_tracker.cpp
 
@@ -29,6 +31,7 @@ MODULE_STATIC_LIBS := \
 
 MODULE_COMPILEFLAGS := \
   -Ikernel/lib/magenta/include \
-  -Isystem/ulib/mxtl/include
+  -Isystem/ulib/mxtl/include \
+  -I$(LOCAL_DIR)/stub-include
 
 include make/module.mk
