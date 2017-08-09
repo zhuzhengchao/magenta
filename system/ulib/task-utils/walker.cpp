@@ -115,7 +115,7 @@ static mx_status_t do_threads_worker(
 
     mx_status_t status;
 
-    // get the list of processes under this job
+    // get the list of threads under this process
     status = fetch_children(process, process_koid, MX_INFO_PROCESS_THREADS,
                             "MX_INFO_PROCESS_THREADS", koids);
     if (status != MX_OK) {
