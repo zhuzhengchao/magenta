@@ -1090,7 +1090,7 @@ endif
 include $(LOCAL_DIR)/src/string/rules.mk
 
 # Include jemalloc for our malloc implementation
-include $(LOCAL_DIR)/../jemalloc/rules.mk
+#include $(LOCAL_DIR)/../jemalloc/rules.mk
 
 include $(LOCAL_DIR)/../../../../third_party/llvm/runtimes/compiler-rt/lib/rules.mk
 
